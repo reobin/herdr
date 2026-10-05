@@ -848,12 +848,15 @@ fn render_pane_rows(
                 if !detail.is_empty() {
                     let width = right.saturating_sub(x);
                     let mut spans = vec![Span::raw(" ")];
+                    let detail_style = Style::default()
+                        .fg(palette.overlay0)
+                        .add_modifier(emphasis(pane_row.focused));
                     spans.extend(upstream::token_spans(
                         detail,
                         Style::default().fg(upstream::status_color(pane_row.status, palette)),
-                        text_style,
-                        text_style,
-                        text_style,
+                        detail_style,
+                        detail_style,
+                        detail_style,
                         palette,
                         usize::from(width.saturating_sub(1)),
                     ));
