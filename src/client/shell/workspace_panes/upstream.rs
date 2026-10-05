@@ -2,6 +2,7 @@
 //! rename or refactor breaks unified layout, the fix belongs here.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::{Mutex, OnceLock};
 
 use ratatui::{layout::Rect, style::Style, text::Span};
 
@@ -298,6 +299,35 @@ pub(super) fn workspace_at(
     index: usize,
 ) -> Option<&ClientShellWorkspace> {
     snapshot.workspaces.get(index)
+}
+
+fn repo_name_cache() -> &'static Mutex<HashMap<String, Option<String>>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Base repo name for a workspace cwd, resolving through linked worktree
+/// checkouts to the common repo (e.g. `ordering-web` for a
+/// `con-4403-...` checkout). Local filesystem only; remote paths miss and
+/// callers fall back to the directory name. Cached per cwd, since headers
+/// render every frame and the mapping is stable for the process lifetime.
+pub(super) fn repo_name_for_cwd(cwd: &str) -> Option<String> {
+    if cwd.is_empty() {
+        return None;
+    }
+    if let Some(cached) = repo_name_cache()
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(cwd).cloned())
+    {
+        return cached;
+    }
+    let repo = crate::workspace::git_space_metadata(std::path::Path::new(cwd))
+        .map(|space| space.repo_name);
+    if let Ok(mut cache) = repo_name_cache().lock() {
+        cache.insert(cwd.to_owned(), repo.clone());
+    }
+    repo
 }
 
 pub(super) fn workspace_token(name: String) -> Token {
