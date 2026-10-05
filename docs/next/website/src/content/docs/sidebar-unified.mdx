@@ -30,7 +30,7 @@ layout = "unified"
 
 ## What the tree shows
 
-Each workspace gets a fixed header: the repo name, plus ` · label` when renamed, then the git branch with ahead/behind counts. The repo resolves through linked worktrees, so a checkout at a different path still shows its repo; outside a repo it falls back to the directory name. One blank row separates workspace blocks.
+Each workspace gets a fixed header: the repo name, plus ` · label` when renamed, then the git branch with ahead/behind counts for every workspace including linked children. The repo resolves through linked worktrees, so a checkout at a different path still shows its repo; outside a repo it falls back to the directory name. One blank row separates workspace blocks.
 
 Inside each workspace, panes group under per-tab sections. Each pane row shows a tree branch, its status icon, and the `[ui.sidebar.agents]` row text flattened into one line. The `state_icon`, `machine`, `workspace`, and `tab` tokens are dropped because the tree already shows them. With the default rows, an agent pane takes two lines: the session label and harness on the first, the reported `$summary` on the second, for example `herdr · pi` with `refactor auth` below it. The second line is reserved whenever the rows include `$summary`, so rows never shift when a summary arrives. A custom layout without `$summary` keeps agent panes to one line. Shell panes without an agent take one line showing the callsign, falling back to `shell`, without a kind prefix: the blank status column already marks them as non-agent rows.
 
