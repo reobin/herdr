@@ -508,7 +508,7 @@ fn renamed_workspace_headers_keep_their_automatic_name_as_context() {
 }
 
 #[test]
-fn header_details_show_only_known_git_values_and_never_on_children() {
+fn header_details_show_only_known_git_values_for_children_too() {
     let mut workspace = snapshot().workspaces.remove(0);
     workspace.git_ahead_behind = Some((2, 1));
     let rows = header_rows(&workspace, false);
@@ -523,10 +523,19 @@ fn header_details_show_only_known_git_values_and_never_on_children() {
             },
         ]
     );
-    assert_eq!(header_rows(&workspace, true).len(), 1);
+    assert_eq!(
+        header_rows(&workspace, true)
+            .iter()
+            .map(|row| row.iter().map(|token| &token.kind).collect::<Vec<_>>())
+            .collect::<Vec<_>>(),
+        rows.iter()
+            .map(|row| row.iter().map(|token| &token.kind).collect::<Vec<_>>())
+            .collect::<Vec<_>>()
+    );
     workspace.branch = None;
     workspace.git_ahead_behind = Some((0, 0));
     assert_eq!(header_rows(&workspace, false).len(), 1);
+    assert_eq!(header_rows(&workspace, true).len(), 1);
     assert!(header_rows(&workspace, false)
         .iter()
         .flatten()
@@ -741,12 +750,14 @@ fn pane_rows_under_worktree_children_continue_the_tree_line() {
         .position(|row| row.starts_with("   ├─ repo"))
         .expect("first child header");
     assert_eq!(
-        rows[start..start + 6],
+        rows[start..start + 8],
         [
             "   ├─ repo",
+            "   │  worktree/ws_2",
             "   │  1",
             "   │  └─  shell",
             "   └─ repo",
+            "      worktree/ws_3",
             "      1",
             "      └─  shell",
         ],

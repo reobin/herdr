@@ -207,16 +207,13 @@ fn pane_row<'a>(
 }
 
 /// Workspace header rows: the repo name (plus ` · label` when renamed),
-/// then branch and ahead/behind when known. Linked worktree children show
-/// the name only.
-pub(super) fn header_rows(workspace: &ClientShellWorkspace, indented: bool) -> Vec<Vec<Token>> {
+/// then branch and ahead/behind when known, for every workspace including
+/// linked worktree children.
+pub(super) fn header_rows(workspace: &ClientShellWorkspace, _indented: bool) -> Vec<Vec<Token>> {
     let facts = upstream::workspace(workspace);
     let mut rows = vec![vec![upstream::workspace_token(
-        header_label(&facts, indented).into_owned(),
+        header_label(&facts, _indented).into_owned(),
     )]];
-    if indented {
-        return rows;
-    }
     let mut details = Vec::new();
     if let Some(branch) = facts.branch {
         details.push(upstream::branch_token(branch));
