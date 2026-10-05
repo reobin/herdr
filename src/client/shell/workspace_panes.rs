@@ -230,15 +230,20 @@ pub(super) fn header_rows(workspace: &ClientShellWorkspace, _indented: bool) -> 
     rows
 }
 
-/// First row is always the repo name (the worktree repo, or the directory
-/// name outside repos), plus the custom label when one is set: `repo` or
-/// `repo · label`. The repo leads so sibling worktrees of one repo share one
-/// name even when checked out at different paths.
+/// First row is always the repo name (the worktree repo, the local git repo
+/// resolving through linked checkouts, or the directory name outside repos),
+/// plus the custom label when one is set: `repo` or `repo · label`. The repo
+/// leads so sibling worktrees of one repo share one name even when checked
+/// out at different paths.
 fn header_label<'w>(facts: &WorkspaceFacts<'w>, _indented: bool) -> Cow<'w, str> {
-    let repo = facts.repo.or_else(|| cwd_dir_name(facts.cwd));
+    let repo: Option<Cow<'w, str>> = facts
+        .repo
+        .map(Cow::Borrowed)
+        .or_else(|| upstream::repo_name_for_cwd(facts.cwd).map(Cow::Owned))
+        .or_else(|| cwd_dir_name(facts.cwd).map(Cow::Borrowed));
     match (repo, facts.custom_label) {
         (Some(repo), true) => Cow::Owned(format!("{repo} · {}", facts.label)),
-        (Some(repo), false) => Cow::Borrowed(repo),
+        (Some(repo), false) => repo,
         (None, _) => Cow::Borrowed(facts.label),
     }
 }
