@@ -475,11 +475,35 @@ impl Default for SpacesSidebarConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SidebarLayout {
+    #[default]
+    Classic,
+    Unified,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct SidebarConfig {
+    pub layout: SidebarLayout,
     pub agents: AgentsSidebarConfig,
     pub spaces: SpacesSidebarConfig,
+}
+
+impl SidebarConfig {
+    /// Unified layout renders branch and ahead/behind in every workspace header,
+    /// so it adds those tokens to the space rows that drive git refresh demand.
+    pub(crate) fn effective_spaces(&self) -> SpacesSidebarConfig {
+        let mut spaces = self.spaces.clone();
+        if self.layout == SidebarLayout::Unified {
+            spaces.rows.push(vec![
+                SpaceSidebarToken::Branch,
+                SpaceSidebarToken::GitStatus,
+            ]);
+        }
+        spaces
+    }
 }
 
 #[cfg(test)]
@@ -725,5 +749,74 @@ rows = [[{ token = "$status", rules = [{ contains = "error", bold = true }] }]]
                 "accepted key {key:?}"
             );
         }
+    }
+
+    #[test]
+    fn classic_mode_leaves_effective_spaces_unchanged() {
+        let config = SidebarConfig {
+            spaces: SpacesSidebarConfig {
+                rows: vec![vec![SpaceSidebarToken::Workspace]],
+                row_gap: 2,
+            },
+            ..SidebarConfig::default()
+        };
+
+        assert_eq!(config.layout, SidebarLayout::Classic);
+        assert_eq!(config.effective_spaces(), config.spaces);
+    }
+
+    #[test]
+    fn unified_layout_appends_git_tokens_to_effective_spaces() {
+        let config = SidebarConfig {
+            layout: SidebarLayout::Unified,
+            spaces: SpacesSidebarConfig {
+                rows: vec![vec![SpaceSidebarToken::Workspace]],
+                row_gap: 2,
+            },
+            ..SidebarConfig::default()
+        };
+
+        assert_eq!(
+            config.effective_spaces(),
+            SpacesSidebarConfig {
+                rows: vec![
+                    vec![SpaceSidebarToken::Workspace],
+                    vec![SpaceSidebarToken::Branch, SpaceSidebarToken::GitStatus],
+                ],
+                row_gap: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn legacy_row_keys_still_parse_in_unified_layout() {
+        let config: crate::config::Config = toml::from_str(
+            r#"
+[ui.sidebar]
+layout = "unified"
+
+[ui.sidebar.spaces]
+rows = [["state_icon", "workspace"]]
+row_gap = 2
+
+[ui.sidebar.agents]
+rows = [["agent"]]
+row_gap = 1
+"#,
+        )
+        .expect("legacy keys parse with unified layout");
+
+        let sidebar = &config.ui.sidebar;
+        assert_eq!(sidebar.layout, SidebarLayout::Unified);
+        assert_eq!(
+            sidebar.spaces.rows,
+            vec![vec![
+                SpaceSidebarToken::StateIcon,
+                SpaceSidebarToken::Workspace
+            ]]
+        );
+        assert_eq!(sidebar.spaces.row_gap, 2);
+        assert_eq!(sidebar.agents.rows, vec![vec![AgentSidebarToken::Agent]]);
+        assert_eq!(sidebar.agents.row_gap, 1);
     }
 }

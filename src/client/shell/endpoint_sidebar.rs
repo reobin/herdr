@@ -22,6 +22,8 @@ pub(super) fn render_collapsed(
     let palette = &config.palette;
     super::render::render_sidebar_background(buffer, area, palette);
     let (workspace_area, divider_y, detail_area) = super::sidebar::collapsed_sidebar_sections(area);
+    let (workspace_area, divider_y, detail_area) =
+        workspace_panes::collapsed(config, area, (workspace_area, divider_y, detail_area));
     let mut total_rows = 0usize;
     let mut selected_row = None;
     let reveal = std::mem::take(state.reveal_navigation_workspace);
@@ -253,6 +255,8 @@ pub(super) fn render_expanded(
         crate::ui::expanded_sidebar_sections(area, state.sidebar_section_split);
     hits.sidebar_section_divider =
         crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split);
+    let panes = workspace_panes::SidebarPanes::machines(config, state);
+    let (workspace_area, detail_area) = panes.areas(area, workspace_area, detail_area, hits);
     put_text(
         buffer,
         workspace_area.x,
@@ -334,6 +338,7 @@ pub(super) fn render_expanded(
             }
         })
         .collect::<Vec<_>>();
+    let row_heights = panes.row_heights(row_heights);
     let gaps = rows
         .iter()
         .enumerate()
@@ -348,6 +353,7 @@ pub(super) fn render_expanded(
             _ => 0,
         })
         .collect::<Vec<_>>();
+    let gaps = panes.row_gaps(gaps);
     let reveal_navigation = !body.is_empty() && std::mem::take(state.reveal_navigation_workspace);
     let reveal_focus = !body.is_empty() && std::mem::take(state.reveal_focused_workspace);
     if reveal_navigation || reveal_focus {
@@ -454,6 +460,8 @@ pub(super) fn render_expanded(
                     &config.spaces,
                 );
                 let height = (tokens.len().max(1).min(u16::MAX as usize) as u16).min(body.height);
+                let (tokens, height) =
+                    panes.machine_block(endpoint, workspace, entry, tokens, height, body);
                 if y.saturating_add(height) > body.bottom() {
                     break;
                 }
@@ -481,6 +489,7 @@ pub(super) fn render_expanded(
                     false,
                     palette,
                 );
+                panes.render_machine(buffer, nested, endpoint, entry, workspace, hits);
                 if endpoint.status != ClientEndpointStatus::Online {
                     buffer.set_style(
                         rect,
@@ -516,6 +525,7 @@ pub(super) fn render_expanded(
         super::scroll::render_list_scrollbar(buffer, track, metrics, palette);
     }
 
+    let workspace_area = panes.footer(workspace_area, area);
     let footer_y = workspace_area.bottom().saturating_sub(1);
     if config.mouse_capture {
         let label = format!(" new · {}", active_endpoint_label(state));

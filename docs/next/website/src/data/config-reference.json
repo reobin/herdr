@@ -1061,6 +1061,16 @@
           ]
         },
         {
+          "key": "ui.sidebar.layout",
+          "type": "enum",
+          "default": "classic",
+          "description": "Expanded sidebar layout. classic keeps the split spaces and agent sections; unified renders one tree of workspaces, tabs, and pane rows.",
+          "values": [
+            "classic",
+            "unified"
+          ]
+        },
+        {
           "key": "ui.sidebar.agents.row_gap",
           "type": "integer",
           "default": "0",

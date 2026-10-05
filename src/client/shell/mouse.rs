@@ -2097,6 +2097,9 @@ impl ClientShellState {
                     self.persist_chrome_preferences(outcome);
                     return;
                 }
+                if workspace_panes::handle_click(self, point, outcome) {
+                    return;
+                }
                 let workspace_press = self
                     .hits
                     .workspaces

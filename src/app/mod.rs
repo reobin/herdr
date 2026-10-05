@@ -527,7 +527,7 @@ impl App {
             agent_panel_sort,
             agent_view_override: None,
             sidebar_agents: config.ui.sidebar.agents.clone(),
-            sidebar_spaces: config.ui.sidebar.spaces.clone(),
+            sidebar_spaces: config.ui.sidebar.effective_spaces(),
             next_agent_state_change_seq: 0,
             confirm_close: config.ui.confirm_close,
             pane_borders: config.ui.pane_borders,
@@ -901,7 +901,7 @@ impl App {
                 self.state.agent_panel_sort =
                     agent_panel_sort_from_config(config.ui.agent_panel_sort);
                 self.state.sidebar_agents = config.ui.sidebar.agents.clone();
-                self.state.sidebar_spaces = config.ui.sidebar.spaces.clone();
+                self.state.sidebar_spaces = config.ui.sidebar.effective_spaces();
                 self.state.sound = config.ui.sound.clone();
                 self.state.toast_config = config.ui.toast.clone();
             }

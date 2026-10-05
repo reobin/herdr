@@ -594,6 +594,18 @@ mod tests {
     }
 
     #[test]
+    fn unified_layout_demands_git_refresh_with_workspace_only_space_rows() {
+        let mut config = crate::config::Config::default();
+        config.ui.sidebar.layout = crate::config::SidebarLayout::Unified;
+        config.ui.sidebar.spaces.rows = vec![vec![crate::config::SpaceSidebarToken::Workspace]];
+        let mut app = test_app(&config);
+        app.state.workspaces.push(Workspace::test_new("test"));
+
+        assert_eq!(app.git_refresh_demand(), GitStatusRefreshDemand::ALL);
+        assert!(app.git_refresh_deadline().is_some());
+    }
+
+    #[test]
     fn unnamed_linked_worktree_does_not_force_periodic_branch_refresh() {
         let mut config = crate::config::Config::default();
         config.ui.sidebar.spaces.rows = vec![vec![crate::config::SpaceSidebarToken::Workspace]];
