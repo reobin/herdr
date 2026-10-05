@@ -57,6 +57,8 @@ pub(crate) fn render_collapsed_sidebar(
     let active_background = workspace_active_background(palette, selected_workspace_id.is_some());
     render_sidebar_background(buffer, area, palette);
     let (workspace_area, divider_y, detail_area) = collapsed_sidebar_sections(area);
+    let (workspace_area, divider_y, detail_area) =
+        workspace_panes::collapsed(config, area, (workspace_area, divider_y, detail_area));
     for (index, workspace) in snapshot
         .workspaces
         .iter()
@@ -215,6 +217,8 @@ pub(crate) fn render_sidebar(
         crate::ui::expanded_sidebar_sections(area, state.sidebar_section_split);
     hits.sidebar_section_divider =
         crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split);
+    let panes = workspace_panes::SidebarPanes::local(snapshot, config, state.active_endpoint_id);
+    let (workspace_area, detail_area) = panes.areas(area, workspace_area, detail_area, hits);
     put_text(
         buffer,
         workspace_area.x,
@@ -256,6 +260,7 @@ pub(crate) fn render_sidebar(
                 .unwrap_or(1)
         })
         .collect::<Vec<_>>();
+    let row_heights = panes.entry_heights(&entries, row_heights);
     let gaps = entries
         .iter()
         .enumerate()
@@ -265,6 +270,7 @@ pub(crate) fn render_sidebar(
                 .map_or(0, |next| u16::from(!next.indented) * config.spaces.row_gap)
         })
         .collect::<Vec<_>>();
+    let gaps = panes.entry_gaps(&entries, gaps);
     let mut metrics = super::scroll::list_scroll_metrics(
         &row_heights,
         &gaps,
@@ -306,6 +312,7 @@ pub(crate) fn render_sidebar(
         let status = displayed_workspace_status(snapshot, workspace, state.collapsed_groups);
         let rows = workspace_rows(workspace, status, entry.indented, &config.spaces);
         let row_height = (rows.len().max(1).min(u16::MAX as usize) as u16).min(body.height);
+        let (rows, row_height) = panes.block(workspace, entry, rows, row_height, body);
         if y.saturating_add(row_height) > body.bottom() {
             break;
         }
@@ -334,6 +341,7 @@ pub(crate) fn render_sidebar(
             dragged,
             palette,
         );
+        panes.render(buffer, rect, entry, workspace, dragged, hits);
         let group_toggle = render_parent_group_toggle(
             buffer,
             rect,
@@ -352,6 +360,7 @@ pub(crate) fn render_sidebar(
         let gap = entries
             .get(entry_position + 1)
             .map_or(0, |next| u16::from(!next.indented) * config.spaces.row_gap);
+        let gap = panes.gap(gap, entries.get(entry_position + 1));
         y = y.saturating_add(row_height + gap);
     }
 
@@ -375,6 +384,7 @@ pub(crate) fn render_sidebar(
         );
     }
 
+    let workspace_area = panes.footer(workspace_area, area);
     let footer_y = workspace_area.bottom().saturating_sub(1);
     if config.mouse_capture {
         hits.new_workspace = Rect::new(
