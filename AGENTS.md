@@ -7,10 +7,12 @@ Terminal based agent runtime for coding agents.
 This checkout is a fork that rebases onto `herdrdev/herdr` master. Keep every change **additive** so each rebase stays clean. These rules win over the rest of this file.
 
 - Fork code lives in `src/client/shell/workspace_panes/` (the unified sidebar, `ui.sidebar.layout = "unified"`) and its tests. Reach upstream internals only through `workspace_panes/upstream.rs`.
-- In upstream files, limit edits to one-statement hook calls into the fork module, at the existing hook sites in `sidebar.rs`, `endpoint_sidebar.rs`, and `mouse.rs`. Upstream code, tests, config keys, docs, and the `classic` default stay as upstream wrote them.
+- Upstream hooks live only in `sidebar.rs`, `endpoint_sidebar.rs`, and `mouse.rs`: one hook call per site into the fork module, no new items or logic in upstream files. The `classic` default stays the default.
+- Frozen plumbing from the initial build (`src/config/sidebar.rs`, `src/config.rs`, `src/app/mod.rs`, `src/app/git_refresh.rs`, `src/client/shell.rs`, `src/client/shell/config.rs`, `src/client/shell/state.rs`, `src/client/shell/tests/mod.rs`, `docs/next/website/src/data/config-reference.json`): no new files there, no growth there. Route new needs through `workspace_panes/upstream.rs`.
 - Fork docs go in fork-only pages such as `docs/next/website/src/content/docs/sidebar-unified.mdx`, English only.
-- Fold each change into the matching fork commit (`feat`, `docs`, `chore`) so the stack stays three commits.
-- Done when `git diff upstream/master --stat` shows each upstream file changed by a few hook lines, and `just test` and `just lint` pass with `ZIG=~/.local/share/mise/installs/zig/0.16.0/zig` and `~/.rustup/toolchains/1.96.1-aarch64-apple-darwin/bin` first on `PATH`.
+- Fetch upstream and rebase early; before each commit check `git diff $(git merge-base HEAD upstream/master)..HEAD --stat`. Raw `diff upstream/master` is noisy when behind.
+- Fold fixups into the matching fork commit (`feat`, `docs`, `chore`) so the stack stays three commits; do not stack `fix:` commits.
+- Done when the merge-base diff shows only fork-owned files plus small hook hunks, and `just test` and `just lint` pass with `ZIG=~/.local/share/mise/installs/zig/0.16.0/zig` and `~/.rustup/toolchains/1.96.1-aarch64-apple-darwin/bin` first on `PATH`.
 - Push to `origin` (`reobin/herdr`), branch `reobin`. The maintainer, pull request, and release workflows below are upstream's and do not apply here. Never run `just preview`, `just release*`, or push `preview-*`/`v*` tags here; publishing stays upstream-only (`preview.yml`/`release.yml` already gate on `herdrdev/herdr`).
 
 ## Scope and Audience
