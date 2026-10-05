@@ -508,6 +508,53 @@ fn renamed_workspace_headers_keep_their_automatic_name_as_context() {
 }
 
 #[test]
+fn header_resolves_base_repo_through_linked_checkout_without_worktree_field() {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let unique = format!(
+        "herdr-header-repo-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let tmp = std::env::temp_dir().join(unique);
+    let main_repo = tmp.join("ordering-web");
+    let main_git = main_repo.join(".git");
+    let checkout_name = "con-4403-search-product-details";
+    let worktree_gitdir = main_git.join("worktrees").join(checkout_name);
+    let checkout = tmp.join("ordering-web-wt").join("feat").join(checkout_name);
+    std::fs::create_dir_all(&worktree_gitdir).unwrap();
+    std::fs::create_dir_all(&checkout).unwrap();
+    std::fs::write(main_git.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+    std::fs::write(worktree_gitdir.join("HEAD"), "ref: refs/heads/feat\n").unwrap();
+    std::fs::write(
+        worktree_gitdir.join("commondir"),
+        main_git.display().to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        checkout.join(".git"),
+        format!("gitdir: {}\n", worktree_gitdir.display()),
+    )
+    .unwrap();
+
+    let mut ws = workspace("ws_repo", 1, checkout_name);
+    ws.new_workspace_cwd = checkout.display().to_string();
+    ws.label = checkout_name.into();
+    ws.custom_label = false;
+    ws.worktree = None;
+    assert_eq!(header_name(&ws, false), "ordering-web");
+
+    ws.custom_label = true;
+    ws.label = "plan-dependencies".into();
+    assert_eq!(header_name(&ws, false), "ordering-web · plan-dependencies");
+
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+#[test]
 fn header_details_show_only_known_git_values_for_children_too() {
     let mut workspace = snapshot().workspaces.remove(0);
     workspace.git_ahead_behind = Some((2, 1));
