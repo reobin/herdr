@@ -1,0 +1,60 @@
+# Fork-only workflow. Exclude from upstream PRs. Intentional Done-rule override, dirty history OK per user.
+name: fork-sync
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: fork-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'reobin/herdr'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Fast-forward master and rebase reobin
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/herdrdev/herdr.git 2>/dev/null || git remote set-url upstream https://github.com/herdrdev/herdr.git
+          git fetch origin
+          git fetch upstream
+
+          git checkout -B master origin/master
+          if ! git merge --ff-only upstream/master; then
+            if [ "$(gh issue list --repo reobin/herdr --state open --search "fork-sync: master is not fast-forwardable in:title" --json number -q 'length')" = "0" ]; then
+              gh issue create --repo reobin/herdr \
+                --title "fork-sync: master is not fast-forwardable" \
+                --body "upstream/master moved but origin/master cannot fast-forward. Manual fix needed."
+            fi
+            exit 1
+          fi
+          git push origin master
+
+          git checkout -B reobin origin/reobin
+          if ! git rebase upstream/master; then
+            git rebase --abort
+            if [ "$(gh issue list --repo reobin/herdr --state open --search "fork-sync: rebase conflict in:title" --json number -q 'length')" = "0" ]; then
+              gh issue create --repo reobin/herdr \
+                --title "fork-sync: rebase conflict" \
+                --body "Rebasing reobin onto upstream/master conflicted. Last synced master is $(git rev-parse --short upstream/master). Fix locally with: git fetch upstream && git checkout reobin && git rebase upstream/master."
+            fi
+            exit 1
+          fi
+          git push --force-with-lease origin reobin
