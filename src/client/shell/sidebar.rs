@@ -341,7 +341,7 @@ pub(crate) fn render_sidebar(
             dragged,
             palette,
         );
-        panes.render(buffer, rect, entry, workspace, dragged, hits);
+        panes.render(buffer, rect, entry, workspace, selected, dragged, hits);
         let group_toggle = render_parent_group_toggle(
             buffer,
             rect,
