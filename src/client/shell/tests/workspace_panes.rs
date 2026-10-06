@@ -171,16 +171,16 @@ fn panes_layout_renders_headers_gap_tree_and_pane_text_at_fixed_geometry() {
         vec![
             " spaces",
             "",
-            "│ repo",
-            "│ main",
-            "│ 1",
-            "│ ├─  shell",
-            "│ └─  shell",
+            " repo",
+            " main",
+            " └─1",
+            "   ├─  shell",
+            "   └─  shell",
             "",
-            "│ ws_2",
-            "│ editor",
-            "│ └─● herdr · pi",
-            "│",
+            " ws_2",
+            " └─editor",
+            "   └─● herdr · pi",
+            "",
             "",
             "",
             "",
@@ -231,14 +231,14 @@ fn panes_layout_renders_headers_gap_tree_and_pane_text_at_fixed_geometry() {
 
     let buffer = frame.to_ratatui_buffer().expect("buffer");
     let bold = |x: u16, y: u16| buffer[(x, y)].modifier.contains(Modifier::BOLD);
-    assert!(bold(2, 2), "focused workspace header is bold");
-    assert!(!bold(2, 8), "unfocused workspace header is not bold");
-    assert!(bold(0, 2), "focused workspace group bar is bold");
-    assert!(!bold(0, 8), "unfocused workspace group bar is not bold");
-    assert!(bold(2, 5), "focused pane branch is bold");
-    assert!(!bold(2, 6), "unfocused pane branch is not bold");
+    assert!(bold(1, 2), "focused workspace header is bold");
+    assert!(!bold(1, 8), "unfocused workspace header is not bold");
+    assert!(bold(1, 4), "filled tab pipe is bold above the focus");
+    assert!(!bold(1, 9), "unfocused workspace tab pipe is not bold");
+    assert!(bold(3, 5), "filled pane corner is bold above the focus");
+    assert!(!bold(3, 6), "unfocused pane corner is not bold");
     assert_eq!(
-        buffer[(4, 10)].fg,
+        buffer[(5, 10)].fg,
         state.config.palette.yellow,
         "working icon"
     );
@@ -281,69 +281,78 @@ fn navigate_selection_marks_type_with_a_block_fill() {
     }
 
     // Names stay primary everywhere; weight marks focus and cursor.
-    let name = row_of("│ ws_2");
-    assert_eq!(buffer[(2, name)].fg, palette.text);
+    let name = row_of(" ws_2");
+    assert_eq!(buffer[(1, name)].fg, palette.text);
     assert!(
-        buffer[(2, name)].modifier.contains(Modifier::BOLD),
+        buffer[(1, name)].modifier.contains(Modifier::BOLD),
         "selected name is bold"
     );
-    let focused = row_of("│ repo");
-    assert_eq!(buffer[(2, focused)].fg, palette.text);
+    let focused = row_of(" repo");
+    assert_eq!(buffer[(1, focused)].fg, palette.text);
     assert!(
-        buffer[(2, focused)].modifier.contains(Modifier::BOLD),
+        buffer[(1, focused)].modifier.contains(Modifier::BOLD),
         "focused name stays bold"
     );
-    let idle = row_of("│ ws_3");
-    assert_eq!(buffer[(2, idle)].fg, palette.text);
+    let idle = row_of(" ws_3");
+    assert_eq!(buffer[(1, idle)].fg, palette.text);
     assert!(
-        !buffer[(2, idle)].modifier.contains(Modifier::BOLD),
+        !buffer[(1, idle)].modifier.contains(Modifier::BOLD),
         "idle name is not bold"
     );
+    // Only pipes above the focused pane fill: the focused workspace pipe
+    // run is bold, while the cursor-selected and idle workspaces stay
+    // quiet because neither holds focus.
+    let focused_tab_pipe = row_of(" └─1");
     assert!(
-        buffer[(0, name)].modifier.contains(Modifier::BOLD),
-        "selected group bar is bold"
+        buffer[(1, focused_tab_pipe)]
+            .modifier
+            .contains(Modifier::BOLD),
+        "filled pipe run is bold above the focus"
     );
+    let selected_tab_pipe = row_of(" └─editor");
     assert!(
-        !buffer[(0, idle)].modifier.contains(Modifier::BOLD),
-        "idle group bar is not bold"
+        !buffer[(1, selected_tab_pipe)]
+            .modifier
+            .contains(Modifier::BOLD),
+        "selected workspace without focus does not fill its pipes"
     );
 
     // Branch lines stay tertiary in every state.
-    let branch = row_of("│ con-4403-auth");
-    assert_eq!(buffer[(2, branch)].fg, palette.overlay0);
-    assert!(!buffer[(2, branch)].modifier.contains(Modifier::BOLD));
-    let main = row_of("│ main");
+    let branch = row_of(" con-4403-auth");
+    assert_eq!(buffer[(1, branch)].fg, palette.overlay0);
+    assert!(!buffer[(1, branch)].modifier.contains(Modifier::BOLD));
+    let main = row_of(" main");
     assert_eq!(
-        buffer[(2, main)].fg,
+        buffer[(1, main)].fg,
         palette.overlay0,
         "branch stays tertiary when focused"
     );
 
     // Tabs sit with the branch line in every state, cursor included.
-    let selected_tab = row_of("│ editor");
-    assert_eq!(buffer[(2, selected_tab)].fg, palette.overlay0);
-    assert!(!buffer[(2, selected_tab)].modifier.contains(Modifier::BOLD));
-    let focused_tab = row_of("│ 1");
-    assert_eq!(buffer[(2, focused_tab)].fg, palette.text);
-    assert!(!buffer[(2, focused_tab)].modifier.contains(Modifier::BOLD));
+    let selected_tab = row_of(" └─editor");
+    assert_eq!(buffer[(3, selected_tab)].fg, palette.overlay0);
+    assert!(!buffer[(3, selected_tab)].modifier.contains(Modifier::BOLD));
+    let focused_tab = row_of(" └─1");
+    assert_eq!(buffer[(3, focused_tab)].fg, palette.text);
+    assert!(!buffer[(3, focused_tab)].modifier.contains(Modifier::BOLD));
 
     // Idle rows sit with the branch line while the focused pane goes
     // primary and bold. Signal rows carry their dot hue in the title and
-    // the tree pipe. Columns come from the fixed tree layout: glyph at
-    // 2-3, icon/blank at 4, text from 6.
-    let focused_pane = row_of("│ ├─  shell");
-    assert_eq!(buffer[(6, focused_pane)].fg, palette.text);
-    assert!(buffer[(6, focused_pane)].modifier.contains(Modifier::BOLD));
-    let working_pane = row_of("│ └─● herdr · pi");
+    // the horizontal arm. Columns come from the fixed tree layout: outer
+    // pipe at 0-1, corner at 2-3, icon/blank at 4, text from 6.
+    let focused_pane = row_of("   ├─  shell");
+    assert_eq!(buffer[(7, focused_pane)].fg, palette.text);
+    assert!(buffer[(7, focused_pane)].modifier.contains(Modifier::BOLD));
+    let working_pane = row_of("   └─● herdr · pi");
     assert_eq!(buffer[(8, working_pane)].fg, palette.yellow);
     assert!(!buffer[(8, working_pane)].modifier.contains(Modifier::BOLD));
-    assert_eq!(buffer[(4, working_pane)].fg, palette.yellow);
+    assert_eq!(buffer[(5, working_pane)].fg, palette.yellow);
     assert_eq!(
-        buffer[(2, working_pane)].fg,
+        buffer[(3, working_pane)].fg,
         palette.yellow,
-        "branch pipe matches the working title"
+        "branch corner matches the working title"
     );
-    assert!(!buffer[(2, working_pane)].modifier.contains(Modifier::BOLD));
+    assert!(!buffer[(3, working_pane)].modifier.contains(Modifier::BOLD));
 }
 
 #[test]
@@ -377,20 +386,27 @@ fn agent_rows_follow_activity_detail_lifts_with_selection() {
         "focused working pane keeps its signal hue"
     );
     assert!(buffer[(8, pane)].modifier.contains(Modifier::BOLD));
+    // The vertical corner fills with the selected color above the focus
+    // while the horizontal arm keeps the working hue: the bonus split.
     assert_eq!(
-        buffer[(2, pane)].fg,
-        palette.yellow,
-        "branch pipe matches the working title"
+        buffer[(3, pane)].fg,
+        palette.text,
+        "filled corner above the focus"
     );
-    assert!(buffer[(2, pane)].modifier.contains(Modifier::BOLD));
+    assert!(buffer[(3, pane)].modifier.contains(Modifier::BOLD));
+    assert_eq!(
+        buffer[(4, pane)].fg,
+        palette.yellow,
+        "horizontal arm keeps the working title hue"
+    );
     let detail = pane + 1;
     assert!(
         rows[detail as usize].contains("reviewing auth"),
         "detail row: {rows:?}"
     );
     // The focused workspace lifts the summary even without the cursor.
-    assert_eq!(buffer[(6, detail)].fg, palette.subtext0);
-    assert!(!buffer[(6, detail)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buffer[(7, detail)].fg, palette.subtext0);
+    assert!(!buffer[(7, detail)].modifier.contains(Modifier::BOLD));
 
     // Background workspaces stay tertiary: focus back on ws_1 while the
     // cursor sits there too keeps ws_2 quiet.
@@ -412,14 +428,14 @@ fn agent_rows_follow_activity_detail_lifts_with_selection() {
     state.navigate_workspace_id = state.navigation_target(&ClientEndpointId::Local, "ws_1");
     let frame = state.compose(100, 16).expect("background agent");
     let buffer = frame.to_ratatui_buffer().expect("buffer");
-    assert_eq!(buffer[(6, detail)].fg, overlay0);
+    assert_eq!(buffer[(7, detail)].fg, overlay0);
 
     // The cursor alone lifts it back without focus.
     state.navigate_workspace_id = state.navigation_target(&ClientEndpointId::Local, "ws_2");
     let frame = state.compose(100, 16).expect("selected agent");
     let buffer = frame.to_ratatui_buffer().expect("buffer");
-    assert_eq!(buffer[(6, detail)].fg, subtext0);
-    assert!(!buffer[(6, detail)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buffer[(7, detail)].fg, subtext0);
+    assert!(!buffer[(7, detail)].modifier.contains(Modifier::BOLD));
 }
 
 #[test]
@@ -453,7 +469,7 @@ fn tab_focus_alone_keeps_sibling_summary_tertiary() {
         .iter()
         .position(|row| row.contains("reviewing auth"))
         .expect("detail row") as u16;
-    assert_eq!(buffer[(6, detail)].fg, palette.overlay0);
+    assert_eq!(buffer[(7, detail)].fg, palette.overlay0);
 }
 
 #[test]
@@ -470,7 +486,7 @@ fn idle_agent_rows_sink_to_tertiary() {
         .position(|row| row.contains("herdr · pi"))
         .expect("pane row") as u16;
     assert_eq!(buffer[(8, pane)].fg, palette.overlay0);
-    assert_eq!(buffer[(2, pane)].fg, palette.overlay0);
+    assert_eq!(buffer[(3, pane)].fg, palette.overlay0);
 }
 
 #[test]
@@ -497,9 +513,9 @@ fn signal_statuses_paint_title_and_pipe_with_the_dot_hue() {
             .position(|row| row.contains("herdr · pi"))
             .expect("pane row") as u16;
         assert_eq!(buffer[(8, pane)].fg, expected, "{status:?} title");
-        assert_eq!(buffer[(2, pane)].fg, expected, "{status:?} branch pipe");
+        assert_eq!(buffer[(3, pane)].fg, expected, "{status:?} branch corner");
         if status != AgentStatus::Idle {
-            assert_eq!(buffer[(4, pane)].fg, expected, "{status:?} dot");
+            assert_eq!(buffer[(5, pane)].fg, expected, "{status:?} dot");
         }
         assert!(
             !buffer[(8, pane)].modifier.contains(Modifier::BOLD),
@@ -524,8 +540,8 @@ fn signal_statuses_paint_title_and_pipe_with_the_dot_hue() {
         .position(|row| row.contains("herdr · pi"))
         .expect("pane row") as u16;
     assert_eq!(buffer[(8, pane)].fg, palette.teal, "done title");
-    assert_eq!(buffer[(2, pane)].fg, palette.teal, "done branch pipe");
-    assert_eq!(buffer[(4, pane)].fg, palette.teal, "done dot");
+    assert_eq!(buffer[(3, pane)].fg, palette.teal, "done branch corner");
+    assert_eq!(buffer[(5, pane)].fg, palette.teal, "done dot");
 }
 
 #[test]
@@ -636,10 +652,10 @@ fn machine_sidebar_lists_pane_rows_under_each_machine() {
         ],
     );
     for (rect, _, _) in &hits {
-        assert_eq!(rows[rect.y as usize], "  │ └─  shell", "{rows:?}");
+        assert_eq!(rows[rect.y as usize], "     └─  shell", "{rows:?}");
         assert_eq!(
             rows[rect.y as usize - 1],
-            "  │ 1",
+            "   └─1",
             "tab header above: {rows:?}"
         );
     }
@@ -754,8 +770,8 @@ fn panes_branch_within_a_tab_and_group_by_tab_bar_order() {
             ("pane_2", PaneBranch::Single),
         ]
     );
-    assert_eq!(PaneBranch::Single.glyph(), "└─");
-    assert_eq!(PaneBranch::Middle.glyph(), "├─");
+    assert_eq!(PaneBranch::Single.corner(), "└");
+    assert_eq!(PaneBranch::Middle.corner(), "├");
     let sections = workspace_pane_sections(&snapshot, "ws_1");
     assert_eq!(
         sections
@@ -886,7 +902,7 @@ fn pane_row_text(config: &Config) -> String {
 
 #[test]
 fn default_agent_layout_shows_label_then_harness() {
-    assert_eq!(pane_row_text(&panes_config()), "│ └─● herdr · pi");
+    assert_eq!(pane_row_text(&panes_config()), "   └─● herdr · pi");
 }
 
 #[test]
@@ -899,8 +915,8 @@ fn default_agent_layout_puts_reported_summary_on_its_own_row() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], "│ └─● herdr · pi");
-    assert_eq!(rows[rect.y as usize + 1], "│     auth");
+    assert_eq!(rows[rect.y as usize], "   └─● herdr · pi");
+    assert_eq!(rows[rect.y as usize + 1], "       auth");
 }
 
 #[test]
@@ -915,7 +931,7 @@ fn harness_label_wins_over_slug_agent_name() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], "│ └─● herdr · claude");
+    assert_eq!(rows[rect.y as usize], "   └─● herdr · claude");
 }
 
 #[test]
@@ -928,8 +944,8 @@ fn missing_summary_falls_back_to_terminal_title() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], "│ └─● herdr · pi");
-    assert_eq!(rows[rect.y as usize + 1], "│     CON-4665 explain…");
+    assert_eq!(rows[rect.y as usize], "   └─● herdr · pi");
+    assert_eq!(rows[rect.y as usize + 1], "       CON-4665 explai…");
 }
 
 #[test]
@@ -943,7 +959,7 @@ fn reported_summary_wins_over_terminal_title() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize + 1], "│     auth");
+    assert_eq!(rows[rect.y as usize + 1], "       auth");
 }
 
 #[test]
@@ -954,8 +970,8 @@ fn agent_row_without_summary_reserves_a_blank_second_row() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], "│ └─● herdr · pi");
-    assert_eq!(rows[rect.y as usize + 1], "│");
+    assert_eq!(rows[rect.y as usize], "   └─● herdr · pi");
+    assert_eq!(rows[rect.y as usize + 1], "");
     assert_eq!(state.hits.workspace_panes.len(), 2);
     assert!(
         state
@@ -968,17 +984,166 @@ fn agent_row_without_summary_reserves_a_blank_second_row() {
 }
 
 #[test]
-fn detail_row_continues_the_branch_pipe_for_later_siblings() {
-    let mut snapshot = snapshot();
-    snapshot.panes.push(shell_pane("pane_2", "ws_1"));
-    snapshot.agents.push(agent("pane_1"));
-    snapshot.agents.push(agent("pane_2"));
+fn pipes_above_the_focused_pane_fill_with_the_selected_color() {
+    // Two panes, second focused: the first pane's vertical corner fills
+    // with the selected color while its horizontal arm and text stay
+    // tertiary. The selected row's own corner fills too.
+    let mut snapshot = two_workspace_snapshot();
+    snapshot.panes[0].focused = false;
+    snapshot.panes[1].focused = true;
     let mut state = panes_state(&panes_config(), snapshot);
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    let palette = &state.config.palette;
+    let first = rows
+        .iter()
+        .position(|row| row == "   ├─  shell")
+        .expect("first pane row") as u16;
+    let second = rows
+        .iter()
+        .position(|row| row == "   └─  shell")
+        .expect("second pane row") as u16;
+    assert_eq!(buffer[(3, first)].fg, palette.text);
+    assert!(buffer[(3, first)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buffer[(4, first)].fg, palette.overlay0);
+    assert!(!buffer[(4, first)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buffer[(7, first)].fg, palette.overlay0);
+    assert_eq!(buffer[(3, second)].fg, palette.text);
+    assert!(buffer[(3, second)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buffer[(1, first - 1)].fg, palette.text, "tab pipe fills");
+    // The tab holding the focus fills its whole branch, arm included.
+    assert_eq!(buffer[(2, first - 1)].fg, palette.text);
+    assert!(
+        buffer[(2, first - 1)].modifier.contains(Modifier::BOLD),
+        "focused tab arm fills"
+    );
+}
+
+#[test]
+fn earlier_tabs_fill_only_the_vertical_corner_cell() {
+    // Focus in the second tab: the first tab's corner fills because it
+    // holds the vertical trunk, but its arm and pane corners stay quiet.
+    // The outer trunk still fills all the way down to the selection, and
+    // the focused tab fills its whole branch.
+    let mut snapshot = snapshot();
+    snapshot.tabs.push(tab("tab_2", "ws_1", 2, "servers"));
+    snapshot
+        .panes
+        .push(shell_pane_in_tab("pane_2", "ws_1", "tab_2"));
+    snapshot.panes[0].focused = false;
+    snapshot.panes[1].focused = true;
+    snapshot.tabs[0].focused = false;
+    snapshot.tabs[1].focused = true;
+    let mut state = panes_state(&panes_config(), snapshot);
+    let frame = state.compose(100, 16).expect("panes sidebar");
+    let rows = sidebar_rows(&frame);
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    let palette = &state.config.palette;
+    let first_tab = rows
+        .iter()
+        .position(|row| row == " ├─1")
+        .expect("first tab row") as u16;
+    let first_pane = rows
+        .iter()
+        .position(|row| row == " │ └─  shell")
+        .expect("first tab pane row") as u16;
+    let second_tab = rows
+        .iter()
+        .position(|row| row == " └─servers")
+        .expect("second tab row") as u16;
+    let second_pane = rows
+        .iter()
+        .position(|row| row == "   └─  shell")
+        .expect("focused pane row") as u16;
+    assert_eq!(
+        buffer[(1, first_tab)].fg,
+        palette.text,
+        "tab corner holds the vertical trunk"
+    );
+    assert!(
+        buffer[(1, first_tab)].modifier.contains(Modifier::BOLD),
+        "trunk corner is bold"
+    );
+    for (x, y) in [(2, first_tab), (3, first_pane)] {
+        assert_eq!(
+            buffer[(x, y)].fg,
+            palette.overlay0,
+            "quiet pipe at ({x}, {y})"
+        );
+        assert!(
+            !buffer[(x, y)].modifier.contains(Modifier::BOLD),
+            "quiet pipe not bold at ({x}, {y})"
+        );
+    }
+    assert_eq!(
+        buffer[(1, first_pane)].fg,
+        palette.text,
+        "trunk fills to the focus"
+    );
+    assert!(
+        buffer[(1, first_pane)].modifier.contains(Modifier::BOLD),
+        "trunk fill is bold"
+    );
+    assert_eq!(buffer[(1, second_tab)].fg, palette.text);
+    assert!(buffer[(1, second_tab)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buffer[(2, second_tab)].fg, palette.text);
+    assert_eq!(buffer[(3, second_pane)].fg, palette.text);
+}
+
+#[test]
+fn detail_row_continues_both_pipes_for_later_siblings_and_tabs() {
+    // Summary rows sit under both continuations: with a later pane in the
+    // tab and a later tab below, the reserved blank row shows the outer
+    // pipe and the tab pipe. Focus on the second pane fills the tab pipe,
+    // while the outer trunk feeds tabs only and stays dry on every pane
+    // row of the focused tab.
+    let mut snapshot = snapshot();
+    snapshot.tabs.push(tab("tab_2", "ws_1", 2, "servers"));
+    snapshot
+        .panes
+        .push(shell_pane_in_tab("pane_2", "ws_1", "tab_2"));
+    snapshot.panes.push(shell_pane("pane_3", "ws_1"));
+    snapshot.agents.push(agent("pane_1"));
+    snapshot.panes[0].focused = false;
+    snapshot.panes[2].focused = true;
+    let mut state = panes_state(&panes_config(), snapshot);
+    let frame = state.compose(100, 16).expect("panes sidebar");
+    let rows = sidebar_rows(&frame);
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    let palette = &state.config.palette;
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], "│ ├─● herdr · pi");
-    assert_eq!(rows[rect.y as usize + 1], "│ │");
+    let pane = rect.y;
+    assert_eq!(rows[pane as usize], " │ ├─● herdr · pi");
+    assert_eq!(rows[pane as usize + 1], " │ │");
+    assert_eq!(
+        buffer[(1, pane)].fg,
+        palette.overlay0,
+        "trunk feeds tabs, not panes"
+    );
+    assert!(
+        !buffer[(1, pane)].modifier.contains(Modifier::BOLD),
+        "dry trunk is not bold"
+    );
+    assert_eq!(
+        buffer[(1, pane + 1)].fg,
+        palette.overlay0,
+        "outer stays dry on detail rows too"
+    );
+    assert!(
+        !buffer[(1, pane + 1)].modifier.contains(Modifier::BOLD),
+        "dry outer is not bold"
+    );
+    assert_eq!(buffer[(3, pane + 1)].fg, palette.text);
+    assert!(
+        buffer[(3, pane + 1)].modifier.contains(Modifier::BOLD),
+        "tab pipe fills above the focus"
+    );
+    assert_eq!(
+        buffer[(4, pane)].fg,
+        palette.yellow,
+        "pane arm keeps the working hue above the focus"
+    );
 }
 
 fn shell_row_text(label: Option<&str>) -> String {
@@ -992,8 +1157,8 @@ fn shell_row_text(label: Option<&str>) -> String {
 
 #[test]
 fn shell_pane_shows_callsign_then_shell_without_prefix() {
-    assert_eq!(shell_row_text(Some("neon")), "│ └─  neon");
-    assert_eq!(shell_row_text(None), "│ └─  shell");
+    assert_eq!(shell_row_text(Some("neon")), "   └─  neon");
+    assert_eq!(shell_row_text(None), "   └─  shell");
 }
 
 #[test]
@@ -1009,7 +1174,7 @@ fn custom_agent_layout_flattens_and_drops_tokens_the_tree_shows() {
         ],
         vec![AgentSidebarToken::StateText],
     ];
-    assert_eq!(pane_row_text(&config), "│ └─● pi · working");
+    assert_eq!(pane_row_text(&config), "   └─● pi · working");
 }
 
 #[test]
@@ -1023,7 +1188,7 @@ fn custom_agent_layout_without_summary_reserves_no_second_row() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], "│ ├─● pi · herdr");
+    assert_eq!(rows[rect.y as usize], "   ├─● pi · herdr");
     assert_eq!(state.hits.workspace_panes.len(), 2);
     assert_eq!(state.hits.workspace_panes[1].0.y, rect.y + 1);
 }
@@ -1032,7 +1197,7 @@ fn custom_agent_layout_without_summary_reserves_no_second_row() {
 fn custom_agent_layout_that_resolves_empty_falls_back_to_agent_and_title() {
     let mut config = panes_config();
     config.ui.sidebar.agents.rows = vec![vec![AgentSidebarToken::Machine]];
-    assert_eq!(pane_row_text(&config), "│ └─● pi · herdr");
+    assert_eq!(pane_row_text(&config), "   └─● pi · herdr");
 }
 
 #[test]
@@ -1051,7 +1216,7 @@ fn tall_workspace_clips_pane_rows_to_the_sidebar_body() {
     assert!(hits
         .iter()
         .all(|(rect, _, _)| rect.y >= body.y && rect.y < body.bottom()));
-    assert_eq!(sidebar_rows(&frame)[2], "│ repo");
+    assert_eq!(sidebar_rows(&frame)[2], " repo");
 }
 
 #[test]
@@ -1080,19 +1245,19 @@ fn pane_rows_under_worktree_children_continue_the_tree_line() {
     let rows = sidebar_rows(&frame);
     let start = rows
         .iter()
-        .position(|row| row.starts_with("│   ├─ repo"))
+        .position(|row| row.starts_with("    ├─ repo"))
         .expect("first child header");
     assert_eq!(
         rows[start..start + 8],
         [
-            "│   ├─ repo",
-            "│   │  worktree/ws_2",
-            "│   │  1",
-            "│   │  └─  shell",
-            "│   └─ repo",
-            "│      worktree/ws_3",
-            "│      1",
-            "│      └─  shell",
+            "    ├─ repo",
+            "    │  worktree/ws_2",
+            "    │  └─1",
+            "    │    └─  shell",
+            "    └─ repo",
+            "       worktree/ws_3",
+            "       └─1",
+            "         └─  shell",
         ],
         "children hug the parent with no gap: {rows:?}"
     );
