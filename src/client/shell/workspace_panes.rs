@@ -513,6 +513,7 @@ impl<'a> SidebarPanes<'a> {
         rect: Rect,
         entry: &WorkspaceEntry,
         workspace: &ClientShellWorkspace,
+        selected: bool,
         dragged: bool,
         hits: &mut ShellHitMap,
     ) {
@@ -522,7 +523,7 @@ impl<'a> SidebarPanes<'a> {
                 entry,
                 workspace,
             };
-            active.render_block(buffer, rect, block, true, dragged, hits);
+            active.render_block(buffer, rect, block, true, selected, dragged, hits);
         }
     }
 
@@ -533,6 +534,7 @@ impl<'a> SidebarPanes<'a> {
         endpoint: &ClientShellEndpoint,
         entry: &WorkspaceEntry,
         workspace: &ClientShellWorkspace,
+        selected: bool,
         hits: &mut ShellHitMap,
     ) {
         let Some(active) = &self.active else {
@@ -548,7 +550,7 @@ impl<'a> SidebarPanes<'a> {
             entry,
             workspace,
         };
-        active.render_block(buffer, rect, block, show_focus, false, hits);
+        active.render_block(buffer, rect, block, show_focus, selected, false, hits);
     }
 }
 
@@ -610,6 +612,7 @@ impl<'a> Active<'a> {
         rect: Rect,
         block: Block<'_>,
         show_focus: bool,
+        selected: bool,
         dragged: bool,
         hits: &mut ShellHitMap,
     ) {
@@ -623,6 +626,7 @@ impl<'a> Active<'a> {
             &entry,
             &rows,
             show_focus && facts.focused,
+            selected,
             dragged,
             palette,
         );
@@ -632,50 +636,60 @@ impl<'a> Active<'a> {
         let start_y = rect.y.saturating_add(rows.len() as u16).min(rect.bottom());
         let rows_area = Rect::new(rect.x, start_y, rect.width, rect.bottom() - start_y);
         let sections = self.sections(block.machine, facts.workspace_id);
+        // Summaries lift for the navigate cursor; workspace or tab focus
+        // alone never promotes another pane's summary.
         let target = PaneRowsTarget {
             entry: &entry,
             endpoint_id,
             show_focus,
+            summary_lift: selected,
         };
         render_pane_rows(buffer, rows_area, sections, target, self.config, hits);
+        render_group_bar(
+            buffer,
+            rect,
+            (show_focus && facts.focused) || selected || dragged,
+            palette,
+        );
     }
 }
 
 struct PaneRowsTarget<'t> {
     entry: &'t Entry,
     endpoint_id: &'t ClientEndpointId,
-    /// False for machines other than the active one, matching their headers.
+    /// False for machines other than the active one, which never show focus.
     show_focus: bool,
+    /// Whether the navigate cursor lifts summaries to secondary.
+    /// Workspace or tab focus alone never does; only the focused pane's
+    /// own summary steps up with it.
+    summary_lift: bool,
 }
 
 /// Mirrors upstream's header text styling. Rows after the name sit one cell
-/// in, under the name, because headers carry no status icon.
+/// in, under the name, because headers carry no status icon. Content starts
+/// one cell past the group bar, leaving a blank column between the bar and
+/// the text.
 fn render_header(
     buffer: &mut Buffer,
     area: Rect,
     entry: &Entry,
     rows: &[Vec<Token>],
     focused: bool,
+    selected: bool,
     dragged: bool,
     palette: &Palette,
 ) {
-    let highlighted = focused || dragged;
+    // The name stays primary in every state; weight alone marks focus and
+    // the navigate cursor. The branch line stays tertiary in every state.
+    let emphasized = focused || selected || dragged;
     let workspace_style = Style::default()
-        .fg(if highlighted {
-            palette.text
-        } else {
-            palette.subtext0
-        })
-        .add_modifier(if highlighted {
+        .fg(palette.text)
+        .add_modifier(if emphasized {
             Modifier::BOLD
         } else {
             Modifier::empty()
         });
-    let secondary_style = Style::default().fg(if focused {
-        palette.mauve
-    } else {
-        palette.overlay0
-    });
+    let secondary_style = Style::default().fg(palette.overlay0);
     for (row_index, row) in rows.iter().enumerate() {
         let y = area.y.saturating_add(row_index as u16);
         if y >= area.bottom() {
@@ -690,14 +704,14 @@ fn render_header(
             };
             put_segment(
                 buffer,
-                area.x,
+                area.x.saturating_add(1),
                 y,
                 area.right(),
                 prefix,
                 Style::default().fg(palette.overlay0),
             )
         } else {
-            area.x.saturating_add(1)
+            area.x.saturating_add(2)
         };
         let width = area.right().saturating_sub(2).saturating_sub(x);
         let spans = upstream::token_spans(
@@ -727,6 +741,7 @@ fn render_pane_rows(
         entry,
         endpoint_id,
         show_focus,
+        summary_lift,
     } = target;
     let palette = upstream::palette(config);
     let emphasis = |focused: bool| {
@@ -745,22 +760,27 @@ fn render_pane_rows(
     };
     let record_hits = upstream::mouse_capture(config);
     let right = rect.right().saturating_sub(2);
-    let left = rect.x.saturating_add(if entry.indented { 6 } else { 1 });
+    let left = rect.x.saturating_add(if entry.indented { 7 } else { 2 });
     let mut y = rect.y;
     for section in sections {
         if y >= rect.bottom() {
             return;
         }
         render_sibling_pipe(buffer, rect, y, entry, palette);
+        // The selected tab goes primary without bold; the cursor never
+        // lifts tabs, and unfocused ones sit with the branch line.
+        let tab_style = if section.tab_focused && show_focus {
+            Style::default().fg(palette.text)
+        } else {
+            Style::default().fg(palette.overlay0)
+        };
         put_text(
             buffer,
             left,
             y,
             right.saturating_sub(left),
             section.tab_label,
-            Style::default()
-                .fg(foreground(section.tab_focused))
-                .add_modifier(emphasis(section.tab_focused)),
+            tab_style,
         );
         y = y.saturating_add(1);
         for pane_row in &section.rows {
@@ -792,9 +812,23 @@ fn render_pane_rows(
                     Style::default().fg(upstream::status_color(pane_row.status, palette)),
                 )
             };
-            let text_style = Style::default()
-                .fg(palette.subtext0)
-                .add_modifier(emphasis(pane_row.focused));
+            // Unfocused rows sit with the branch line; only an agent with
+            // something to say (working, blocked, done) steps up to
+            // secondary. The focused pane alone goes primary and bold. The
+            // cursor never changes row color. Status icons keep their
+            // signal hues everywhere.
+            let text_style = if pane_row.focused && show_focus {
+                Style::default()
+                    .fg(palette.text)
+                    .add_modifier(Modifier::BOLD)
+            } else if matches!(
+                pane_row.status,
+                AgentStatus::Working | AgentStatus::Blocked | AgentStatus::Done
+            ) {
+                Style::default().fg(palette.subtext0)
+            } else {
+                Style::default().fg(palette.overlay0)
+            };
             if pane_row.tokens.is_empty() {
                 // A shell row's label is its callsign, so the kind prefix
                 // would only repeat what the blank status column says. Agent
@@ -848,9 +882,13 @@ fn render_pane_rows(
                 if !detail.is_empty() {
                     let width = right.saturating_sub(x);
                     let mut spans = vec![Span::raw(" ")];
-                    let detail_style = Style::default()
-                        .fg(palette.overlay0)
-                        .add_modifier(emphasis(pane_row.focused));
+                    // Summaries stay tertiary unless their own pane holds
+                    // focus or the workspace carries the cursor, never bold.
+                    let detail_style = if (pane_row.focused && show_focus) || summary_lift {
+                        Style::default().fg(palette.subtext0)
+                    } else {
+                        Style::default().fg(palette.overlay0)
+                    };
                     spans.extend(upstream::token_spans(
                         detail,
                         Style::default().fg(upstream::status_color(pane_row.status, palette)),
@@ -876,13 +914,44 @@ fn render_pane_rows(
     }
 }
 
+/// Left bar marking each workspace block as one group. Bold once the
+/// workspace is focused or carries the navigate cursor, matching the
+/// header emphasis.
+fn render_group_bar(buffer: &mut Buffer, rect: Rect, highlighted: bool, palette: &Palette) {
+    if rect.is_empty() {
+        return;
+    }
+    for y in rect.y..rect.bottom() {
+        let bg = buffer[(rect.x, y)].bg;
+        put_text(
+            buffer,
+            rect.x,
+            y,
+            1,
+            "│",
+            Style::default()
+                .fg(if highlighted {
+                    palette.text
+                } else {
+                    palette.overlay0
+                })
+                .bg(bg)
+                .add_modifier(if highlighted {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
+        );
+    }
+}
+
 /// Continues the worktree tree line past a child that has later siblings, as
-/// its own header row does.
+/// its own header row does. Offset one cell for the group bar gap.
 fn render_sibling_pipe(buffer: &mut Buffer, rect: Rect, y: u16, entry: &Entry, palette: &Palette) {
     if entry.indented && !entry.last_child {
         put_segment(
             buffer,
-            rect.x,
+            rect.x.saturating_add(1),
             y,
             rect.right(),
             "   │",
