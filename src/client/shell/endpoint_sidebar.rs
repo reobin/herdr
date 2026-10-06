@@ -489,7 +489,7 @@ pub(super) fn render_expanded(
                     false,
                     palette,
                 );
-                panes.render_machine(buffer, nested, endpoint, entry, workspace, hits);
+                panes.render_machine(buffer, nested, endpoint, entry, workspace, selected, hits);
                 if endpoint.status != ClientEndpointStatus::Online {
                     buffer.set_style(
                         rect,

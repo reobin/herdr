@@ -171,16 +171,16 @@ fn panes_layout_renders_headers_gap_tree_and_pane_text_at_fixed_geometry() {
         vec![
             " spaces",
             "",
-            " repo",
-            " main",
-            " 1",
-            " ├─  shell",
-            " └─  shell",
+            "│ repo",
+            "│ main",
+            "│ 1",
+            "│ ├─  shell",
+            "│ └─  shell",
             "",
-            " ws_2",
-            " editor",
-            " └─● herdr · pi",
-            "",
+            "│ ws_2",
+            "│ editor",
+            "│ └─● herdr · pi",
+            "│",
             "",
             "",
             "",
@@ -231,15 +231,233 @@ fn panes_layout_renders_headers_gap_tree_and_pane_text_at_fixed_geometry() {
 
     let buffer = frame.to_ratatui_buffer().expect("buffer");
     let bold = |x: u16, y: u16| buffer[(x, y)].modifier.contains(Modifier::BOLD);
-    assert!(bold(1, 2), "focused workspace header is bold");
-    assert!(!bold(1, 8), "unfocused workspace header is not bold");
-    assert!(bold(1, 5), "focused pane branch is bold");
-    assert!(!bold(1, 6), "unfocused pane branch is not bold");
+    assert!(bold(2, 2), "focused workspace header is bold");
+    assert!(!bold(2, 8), "unfocused workspace header is not bold");
+    assert!(bold(0, 2), "focused workspace group bar is bold");
+    assert!(!bold(0, 8), "unfocused workspace group bar is not bold");
+    assert!(bold(2, 5), "focused pane branch is bold");
+    assert!(!bold(2, 6), "unfocused pane branch is not bold");
     assert_eq!(
-        buffer[(3, 10)].fg,
+        buffer[(4, 10)].fg,
         state.config.palette.yellow,
         "working icon"
     );
+}
+
+#[test]
+fn navigate_selection_marks_type_with_a_block_fill() {
+    let mut snapshot = two_workspace_snapshot();
+    snapshot.workspaces[1].branch = Some("con-4403-auth".into());
+    snapshot.workspaces.push(workspace("ws_3", 3, "idle"));
+    let mut state = panes_state(&panes_config(), snapshot);
+    state.mode = ClientShellMode::Navigate;
+    state.navigate_workspace_id = state.navigation_target(&ClientEndpointId::Local, "ws_2");
+    let frame = state.compose(100, 24).expect("selected sidebar");
+    let rows = sidebar_rows(&frame);
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    let palette = &state.config.palette;
+    let row_of = |needle: &str| {
+        rows.iter()
+            .position(|row| row == needle)
+            .unwrap_or_else(|| panic!("missing row {needle}: {rows:?}")) as u16
+    };
+
+    // Cursor fill: every selected-block cell keeps the selection background.
+    let selected = state
+        .hits
+        .workspaces
+        .iter()
+        .find(|hit| hit.workspace_id == "ws_2")
+        .expect("ws_2 hit")
+        .rect;
+    for y in selected.y..selected.bottom() {
+        for x in selected.x..selected.right() {
+            assert_eq!(
+                buffer[(x, y)].bg,
+                palette.selection_bg,
+                "cursor fill at ({x}, {y})"
+            );
+        }
+    }
+
+    // Names stay primary everywhere; weight marks focus and cursor.
+    let name = row_of("│ ws_2");
+    assert_eq!(buffer[(2, name)].fg, palette.text);
+    assert!(
+        buffer[(2, name)].modifier.contains(Modifier::BOLD),
+        "selected name is bold"
+    );
+    let focused = row_of("│ repo");
+    assert_eq!(buffer[(2, focused)].fg, palette.text);
+    assert!(
+        buffer[(2, focused)].modifier.contains(Modifier::BOLD),
+        "focused name stays bold"
+    );
+    let idle = row_of("│ ws_3");
+    assert_eq!(buffer[(2, idle)].fg, palette.text);
+    assert!(
+        !buffer[(2, idle)].modifier.contains(Modifier::BOLD),
+        "idle name is not bold"
+    );
+    assert!(
+        buffer[(0, name)].modifier.contains(Modifier::BOLD),
+        "selected group bar is bold"
+    );
+    assert!(
+        !buffer[(0, idle)].modifier.contains(Modifier::BOLD),
+        "idle group bar is not bold"
+    );
+
+    // Branch lines stay tertiary in every state.
+    let branch = row_of("│ con-4403-auth");
+    assert_eq!(buffer[(2, branch)].fg, palette.overlay0);
+    assert!(!buffer[(2, branch)].modifier.contains(Modifier::BOLD));
+    let main = row_of("│ main");
+    assert_eq!(
+        buffer[(2, main)].fg,
+        palette.overlay0,
+        "branch stays tertiary when focused"
+    );
+
+    // Tabs sit with the branch line in every state, cursor included.
+    let selected_tab = row_of("│ editor");
+    assert_eq!(buffer[(2, selected_tab)].fg, palette.overlay0);
+    assert!(!buffer[(2, selected_tab)].modifier.contains(Modifier::BOLD));
+    let focused_tab = row_of("│ 1");
+    assert_eq!(buffer[(2, focused_tab)].fg, palette.text);
+    assert!(!buffer[(2, focused_tab)].modifier.contains(Modifier::BOLD));
+
+    // Unfocused rows sit with the branch line; only a working agent steps
+    // up to secondary, while the focused pane goes primary and bold.
+    // Status icons keep their signal hues in every state. Columns come from
+    // the fixed tree layout: glyph at 2-3, icon/blank at 4, text from 6.
+    let focused_pane = row_of("│ ├─  shell");
+    assert_eq!(buffer[(6, focused_pane)].fg, palette.text);
+    assert!(buffer[(6, focused_pane)].modifier.contains(Modifier::BOLD));
+    let working_pane = row_of("│ └─● herdr · pi");
+    assert_eq!(buffer[(8, working_pane)].fg, palette.subtext0);
+    assert!(!buffer[(8, working_pane)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buffer[(4, working_pane)].fg, palette.yellow);
+}
+
+#[test]
+fn agent_rows_follow_activity_detail_lifts_with_selection() {
+    let mut snapshot = two_workspace_snapshot();
+    snapshot.focused_workspace_id = Some("ws_2".into());
+    snapshot.focused_tab_id = Some("tab_2".into());
+    snapshot.focused_pane_id = Some("pane_3".into());
+    snapshot.workspaces[0].focused = false;
+    snapshot.workspaces[1].focused = true;
+    snapshot.tabs[0].focused = false;
+    snapshot.tabs[1].focused = true;
+    for pane in &mut snapshot.panes {
+        pane.focused = pane.pane_id == "pane_3";
+    }
+    snapshot.agents[0].focused = true;
+    snapshot.agents[0].terminal_title_stripped = Some("reviewing auth".into());
+    let mut state = panes_state(&panes_config(), snapshot);
+    let frame = state.compose(100, 16).expect("focused agent");
+    let rows = sidebar_rows(&frame);
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    let palette = &state.config.palette;
+
+    let pane = rows
+        .iter()
+        .position(|row| row.contains("herdr · pi"))
+        .expect("pane row") as u16;
+    assert_eq!(
+        buffer[(8, pane)].fg,
+        palette.text,
+        "focused pane goes primary"
+    );
+    assert!(buffer[(8, pane)].modifier.contains(Modifier::BOLD));
+    let detail = pane + 1;
+    assert!(
+        rows[detail as usize].contains("reviewing auth"),
+        "detail row: {rows:?}"
+    );
+    // The focused workspace lifts the summary even without the cursor.
+    assert_eq!(buffer[(6, detail)].fg, palette.subtext0);
+    assert!(!buffer[(6, detail)].modifier.contains(Modifier::BOLD));
+
+    // Background workspaces stay tertiary: focus back on ws_1 while the
+    // cursor sits there too keeps ws_2 quiet.
+    let subtext0 = palette.subtext0;
+    let overlay0 = palette.overlay0;
+    let snapshot = state.snapshot.as_mut().expect("snapshot");
+    snapshot.focused_workspace_id = Some("ws_1".into());
+    snapshot.focused_tab_id = Some("tab_1".into());
+    snapshot.focused_pane_id = Some("pane_1".into());
+    snapshot.workspaces[0].focused = true;
+    snapshot.workspaces[1].focused = false;
+    snapshot.tabs[0].focused = true;
+    snapshot.tabs[1].focused = false;
+    for pane in &mut snapshot.panes {
+        pane.focused = pane.pane_id == "pane_1";
+    }
+    snapshot.agents[0].focused = false;
+    state.mode = ClientShellMode::Navigate;
+    state.navigate_workspace_id = state.navigation_target(&ClientEndpointId::Local, "ws_1");
+    let frame = state.compose(100, 16).expect("background agent");
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    assert_eq!(buffer[(6, detail)].fg, overlay0);
+
+    // The cursor alone lifts it back without focus.
+    state.navigate_workspace_id = state.navigation_target(&ClientEndpointId::Local, "ws_2");
+    let frame = state.compose(100, 16).expect("selected agent");
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    assert_eq!(buffer[(6, detail)].fg, subtext0);
+    assert!(!buffer[(6, detail)].modifier.contains(Modifier::BOLD));
+}
+
+#[test]
+fn tab_focus_alone_keeps_sibling_summary_tertiary() {
+    // The workspace and tab hold focus, but the agent pane itself does
+    // not: its summary must stay quiet.
+    let mut snapshot = two_workspace_snapshot();
+    snapshot.focused_workspace_id = Some("ws_2".into());
+    snapshot.focused_tab_id = Some("tab_2".into());
+    snapshot.focused_pane_id = Some("pane_4".into());
+    snapshot.workspaces[0].focused = false;
+    snapshot.workspaces[1].focused = true;
+    snapshot.tabs[0].focused = false;
+    snapshot.tabs[1].focused = true;
+    let mut shell = shell_pane_in_tab("pane_4", "ws_2", "tab_2");
+    shell.focused = true;
+    snapshot.panes.push(shell);
+    for pane in &mut snapshot.panes {
+        if pane.pane_id != "pane_4" {
+            pane.focused = false;
+        }
+    }
+    snapshot.agents[0].focused = false;
+    snapshot.agents[0].terminal_title_stripped = Some("reviewing auth".into());
+    let mut state = panes_state(&panes_config(), snapshot);
+    let frame = state.compose(100, 16).expect("tab-focused agent");
+    let rows = sidebar_rows(&frame);
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    let palette = &state.config.palette;
+    let detail = rows
+        .iter()
+        .position(|row| row.contains("reviewing auth"))
+        .expect("detail row") as u16;
+    assert_eq!(buffer[(6, detail)].fg, palette.overlay0);
+}
+
+#[test]
+fn idle_agent_rows_sink_to_tertiary() {
+    let mut snapshot = two_workspace_snapshot();
+    snapshot.agents[0].agent_status = AgentStatus::Idle;
+    let mut state = panes_state(&panes_config(), snapshot);
+    let frame = state.compose(100, 16).expect("idle agent");
+    let rows = sidebar_rows(&frame);
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    let palette = &state.config.palette;
+    let pane = rows
+        .iter()
+        .position(|row| row.contains("herdr · pi"))
+        .expect("pane row") as u16;
+    assert_eq!(buffer[(8, pane)].fg, palette.overlay0);
 }
 
 #[test]
@@ -350,10 +568,10 @@ fn machine_sidebar_lists_pane_rows_under_each_machine() {
         ],
     );
     for (rect, _, _) in &hits {
-        assert_eq!(rows[rect.y as usize], "   └─  shell", "{rows:?}");
+        assert_eq!(rows[rect.y as usize], "  │ └─  shell", "{rows:?}");
         assert_eq!(
             rows[rect.y as usize - 1],
-            "   1",
+            "  │ 1",
             "tab header above: {rows:?}"
         );
     }
@@ -600,7 +818,7 @@ fn pane_row_text(config: &Config) -> String {
 
 #[test]
 fn default_agent_layout_shows_label_then_harness() {
-    assert_eq!(pane_row_text(&panes_config()), " └─● herdr · pi");
+    assert_eq!(pane_row_text(&panes_config()), "│ └─● herdr · pi");
 }
 
 #[test]
@@ -613,8 +831,8 @@ fn default_agent_layout_puts_reported_summary_on_its_own_row() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], " └─● herdr · pi");
-    assert_eq!(rows[rect.y as usize + 1], "     auth");
+    assert_eq!(rows[rect.y as usize], "│ └─● herdr · pi");
+    assert_eq!(rows[rect.y as usize + 1], "│     auth");
 }
 
 #[test]
@@ -629,7 +847,7 @@ fn harness_label_wins_over_slug_agent_name() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], " └─● herdr · claude");
+    assert_eq!(rows[rect.y as usize], "│ └─● herdr · claude");
 }
 
 #[test]
@@ -642,8 +860,8 @@ fn missing_summary_falls_back_to_terminal_title() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], " └─● herdr · pi");
-    assert_eq!(rows[rect.y as usize + 1], "     CON-4665 explain …");
+    assert_eq!(rows[rect.y as usize], "│ └─● herdr · pi");
+    assert_eq!(rows[rect.y as usize + 1], "│     CON-4665 explain…");
 }
 
 #[test]
@@ -657,7 +875,7 @@ fn reported_summary_wins_over_terminal_title() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize + 1], "     auth");
+    assert_eq!(rows[rect.y as usize + 1], "│     auth");
 }
 
 #[test]
@@ -668,8 +886,8 @@ fn agent_row_without_summary_reserves_a_blank_second_row() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], " └─● herdr · pi");
-    assert_eq!(rows[rect.y as usize + 1], "");
+    assert_eq!(rows[rect.y as usize], "│ └─● herdr · pi");
+    assert_eq!(rows[rect.y as usize + 1], "│");
     assert_eq!(state.hits.workspace_panes.len(), 2);
     assert!(
         state
@@ -691,8 +909,8 @@ fn detail_row_continues_the_branch_pipe_for_later_siblings() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], " ├─● herdr · pi");
-    assert_eq!(rows[rect.y as usize + 1], " │");
+    assert_eq!(rows[rect.y as usize], "│ ├─● herdr · pi");
+    assert_eq!(rows[rect.y as usize + 1], "│ │");
 }
 
 fn shell_row_text(label: Option<&str>) -> String {
@@ -706,8 +924,8 @@ fn shell_row_text(label: Option<&str>) -> String {
 
 #[test]
 fn shell_pane_shows_callsign_then_shell_without_prefix() {
-    assert_eq!(shell_row_text(Some("neon")), " └─  neon");
-    assert_eq!(shell_row_text(None), " └─  shell");
+    assert_eq!(shell_row_text(Some("neon")), "│ └─  neon");
+    assert_eq!(shell_row_text(None), "│ └─  shell");
 }
 
 #[test]
@@ -723,7 +941,7 @@ fn custom_agent_layout_flattens_and_drops_tokens_the_tree_shows() {
         ],
         vec![AgentSidebarToken::StateText],
     ];
-    assert_eq!(pane_row_text(&config), " └─● pi · working");
+    assert_eq!(pane_row_text(&config), "│ └─● pi · working");
 }
 
 #[test]
@@ -737,7 +955,7 @@ fn custom_agent_layout_without_summary_reserves_no_second_row() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], " ├─● pi · herdr");
+    assert_eq!(rows[rect.y as usize], "│ ├─● pi · herdr");
     assert_eq!(state.hits.workspace_panes.len(), 2);
     assert_eq!(state.hits.workspace_panes[1].0.y, rect.y + 1);
 }
@@ -746,7 +964,7 @@ fn custom_agent_layout_without_summary_reserves_no_second_row() {
 fn custom_agent_layout_that_resolves_empty_falls_back_to_agent_and_title() {
     let mut config = panes_config();
     config.ui.sidebar.agents.rows = vec![vec![AgentSidebarToken::Machine]];
-    assert_eq!(pane_row_text(&config), " └─● pi · herdr");
+    assert_eq!(pane_row_text(&config), "│ └─● pi · herdr");
 }
 
 #[test]
@@ -765,7 +983,7 @@ fn tall_workspace_clips_pane_rows_to_the_sidebar_body() {
     assert!(hits
         .iter()
         .all(|(rect, _, _)| rect.y >= body.y && rect.y < body.bottom()));
-    assert_eq!(sidebar_rows(&frame)[2], " repo");
+    assert_eq!(sidebar_rows(&frame)[2], "│ repo");
 }
 
 #[test]
@@ -794,19 +1012,19 @@ fn pane_rows_under_worktree_children_continue_the_tree_line() {
     let rows = sidebar_rows(&frame);
     let start = rows
         .iter()
-        .position(|row| row.starts_with("   ├─ repo"))
+        .position(|row| row.starts_with("│   ├─ repo"))
         .expect("first child header");
     assert_eq!(
         rows[start..start + 8],
         [
-            "   ├─ repo",
-            "   │  worktree/ws_2",
-            "   │  1",
-            "   │  └─  shell",
-            "   └─ repo",
-            "      worktree/ws_3",
-            "      1",
-            "      └─  shell",
+            "│   ├─ repo",
+            "│   │  worktree/ws_2",
+            "│   │  1",
+            "│   │  └─  shell",
+            "│   └─ repo",
+            "│      worktree/ws_3",
+            "│      1",
+            "│      └─  shell",
         ],
         "children hug the parent with no gap: {rows:?}"
     );
