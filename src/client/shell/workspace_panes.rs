@@ -751,13 +751,6 @@ fn render_pane_rows(
             Modifier::empty()
         }
     };
-    let foreground = |focused: bool| {
-        if focused && show_focus {
-            palette.text
-        } else {
-            palette.overlay0
-        }
-    };
     let record_hits = upstream::mouse_capture(config);
     let right = rect.right().saturating_sub(2);
     let left = rect.x.saturating_add(if entry.indented { 7 } else { 2 });
@@ -788,16 +781,25 @@ fn render_pane_rows(
                 return;
             }
             render_sibling_pipe(buffer, rect, y, entry, palette);
-            let mut x = put_segment(
-                buffer,
-                left,
-                y,
-                right,
-                pane_row.branch.glyph(),
-                Style::default()
-                    .fg(foreground(pane_row.focused))
+            // Signal rows carry their dot hue in the title and the tree
+            // pipe: working yellow, done teal-green, blocked red (bold when
+            // focused). Idle and unknown stay as today: primary bold when
+            // focused, tertiary otherwise. The cursor never changes row color.
+            let text_style = match pane_row.status {
+                AgentStatus::Working | AgentStatus::Blocked | AgentStatus::Done => Style::default()
+                    .fg(upstream::status_color(pane_row.status, palette))
                     .add_modifier(emphasis(pane_row.focused)),
-            );
+                _ => {
+                    if pane_row.focused && show_focus {
+                        Style::default()
+                            .fg(palette.text)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(palette.overlay0)
+                    }
+                }
+            };
+            let mut x = put_segment(buffer, left, y, right, pane_row.branch.glyph(), text_style);
             // Unknown carries no signal (detection never ran), so it leaves a
             // blank instead of gluing a second dot onto the branch.
             x = if pane_row.status == AgentStatus::Unknown {
@@ -811,23 +813,6 @@ fn render_pane_rows(
                     upstream::status_icon(pane_row.status, config),
                     Style::default().fg(upstream::status_color(pane_row.status, palette)),
                 )
-            };
-            // Unfocused rows sit with the branch line; only an agent with
-            // something to say (working, blocked, done) steps up to
-            // secondary. The focused pane alone goes primary and bold. The
-            // cursor never changes row color. Status icons keep their
-            // signal hues everywhere.
-            let text_style = if pane_row.focused && show_focus {
-                Style::default()
-                    .fg(palette.text)
-                    .add_modifier(Modifier::BOLD)
-            } else if matches!(
-                pane_row.status,
-                AgentStatus::Working | AgentStatus::Blocked | AgentStatus::Done
-            ) {
-                Style::default().fg(palette.subtext0)
-            } else {
-                Style::default().fg(palette.overlay0)
             };
             if pane_row.tokens.is_empty() {
                 // A shell row's label is its callsign, so the kind prefix
@@ -868,16 +853,7 @@ fn render_pane_rows(
                 }
                 render_sibling_pipe(buffer, rect, y, entry, palette);
                 if matches!(pane_row.branch, PaneBranch::First | PaneBranch::Middle) {
-                    put_segment(
-                        buffer,
-                        left,
-                        y,
-                        right,
-                        "│ ",
-                        Style::default()
-                            .fg(foreground(pane_row.focused))
-                            .add_modifier(emphasis(pane_row.focused)),
-                    );
+                    put_segment(buffer, left, y, right, "│ ", text_style);
                 }
                 if !detail.is_empty() {
                     let width = right.saturating_sub(x);
