@@ -327,17 +327,23 @@ fn navigate_selection_marks_type_with_a_block_fill() {
     assert_eq!(buffer[(2, focused_tab)].fg, palette.text);
     assert!(!buffer[(2, focused_tab)].modifier.contains(Modifier::BOLD));
 
-    // Unfocused rows sit with the branch line; only a working agent steps
-    // up to secondary, while the focused pane goes primary and bold.
-    // Status icons keep their signal hues in every state. Columns come from
-    // the fixed tree layout: glyph at 2-3, icon/blank at 4, text from 6.
+    // Idle rows sit with the branch line while the focused pane goes
+    // primary and bold. Signal rows carry their dot hue in the title and
+    // the tree pipe. Columns come from the fixed tree layout: glyph at
+    // 2-3, icon/blank at 4, text from 6.
     let focused_pane = row_of("│ ├─  shell");
     assert_eq!(buffer[(6, focused_pane)].fg, palette.text);
     assert!(buffer[(6, focused_pane)].modifier.contains(Modifier::BOLD));
     let working_pane = row_of("│ └─● herdr · pi");
-    assert_eq!(buffer[(8, working_pane)].fg, palette.subtext0);
+    assert_eq!(buffer[(8, working_pane)].fg, palette.yellow);
     assert!(!buffer[(8, working_pane)].modifier.contains(Modifier::BOLD));
     assert_eq!(buffer[(4, working_pane)].fg, palette.yellow);
+    assert_eq!(
+        buffer[(2, working_pane)].fg,
+        palette.yellow,
+        "branch pipe matches the working title"
+    );
+    assert!(!buffer[(2, working_pane)].modifier.contains(Modifier::BOLD));
 }
 
 #[test]
@@ -367,10 +373,16 @@ fn agent_rows_follow_activity_detail_lifts_with_selection() {
         .expect("pane row") as u16;
     assert_eq!(
         buffer[(8, pane)].fg,
-        palette.text,
-        "focused pane goes primary"
+        palette.yellow,
+        "focused working pane keeps its signal hue"
     );
     assert!(buffer[(8, pane)].modifier.contains(Modifier::BOLD));
+    assert_eq!(
+        buffer[(2, pane)].fg,
+        palette.yellow,
+        "branch pipe matches the working title"
+    );
+    assert!(buffer[(2, pane)].modifier.contains(Modifier::BOLD));
     let detail = pane + 1;
     assert!(
         rows[detail as usize].contains("reviewing auth"),
@@ -458,6 +470,62 @@ fn idle_agent_rows_sink_to_tertiary() {
         .position(|row| row.contains("herdr · pi"))
         .expect("pane row") as u16;
     assert_eq!(buffer[(8, pane)].fg, palette.overlay0);
+    assert_eq!(buffer[(2, pane)].fg, palette.overlay0);
+}
+
+#[test]
+fn signal_statuses_paint_title_and_pipe_with_the_dot_hue() {
+    for (status, expected) in [
+        (AgentStatus::Working, "yellow"),
+        (AgentStatus::Blocked, "red"),
+        (AgentStatus::Idle, "overlay0"),
+    ] {
+        let mut snapshot = two_workspace_snapshot();
+        snapshot.agents[0].agent_status = status;
+        let mut state = panes_state(&panes_config(), snapshot);
+        let frame = state.compose(100, 16).expect("signal agent");
+        let rows = sidebar_rows(&frame);
+        let buffer = frame.to_ratatui_buffer().expect("buffer");
+        let palette = &state.config.palette;
+        let expected = match expected {
+            "yellow" => palette.yellow,
+            "red" => palette.red,
+            _ => palette.overlay0,
+        };
+        let pane = rows
+            .iter()
+            .position(|row| row.contains("herdr · pi"))
+            .expect("pane row") as u16;
+        assert_eq!(buffer[(8, pane)].fg, expected, "{status:?} title");
+        assert_eq!(buffer[(2, pane)].fg, expected, "{status:?} branch pipe");
+        if status != AgentStatus::Idle {
+            assert_eq!(buffer[(4, pane)].fg, expected, "{status:?} dot");
+        }
+        assert!(
+            !buffer[(8, pane)].modifier.contains(Modifier::BOLD),
+            "{status:?} unfocused title is not bold"
+        );
+    }
+
+    // Done is client-projected from idle-after-work, so drive working
+    // first on one state, then the idle completion with a bumped seq.
+    let mut state = panes_state(&panes_config(), two_workspace_snapshot());
+    state.compose(100, 16).expect("working agent");
+    let mut done = two_workspace_snapshot();
+    done.agents[0].agent_status = AgentStatus::Idle;
+    done.agents[0].state_change_seq = 2;
+    state.set_snapshot(Box::new(done));
+    let frame = state.compose(100, 16).expect("done agent");
+    let rows = sidebar_rows(&frame);
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    let palette = &state.config.palette;
+    let pane = rows
+        .iter()
+        .position(|row| row.contains("herdr · pi"))
+        .expect("pane row") as u16;
+    assert_eq!(buffer[(8, pane)].fg, palette.teal, "done title");
+    assert_eq!(buffer[(2, pane)].fg, palette.teal, "done branch pipe");
+    assert_eq!(buffer[(4, pane)].fg, palette.teal, "done dot");
 }
 
 #[test]
