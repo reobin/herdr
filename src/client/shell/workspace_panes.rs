@@ -26,6 +26,22 @@ use upstream::{
 /// other block is separated by one row.
 pub(super) const WORKSPACE_ROW_GAP: u16 = 1;
 
+/// Heartbeat for the working spinner. Timer ticks only recompose when a tick
+/// requests a repaint, so an idle shell would freeze the animation between
+/// unrelated activity. The client Timer arm ORs this into its repaint
+/// decision; true while unified layout has a working agent to animate.
+pub(crate) fn spinner_needs_repaint(shell: &ClientShellState) -> bool {
+    if !upstream::unified_layout(&shell.config) {
+        return false;
+    }
+    shell.snapshot.as_ref().is_some_and(|snapshot| {
+        snapshot
+            .agents
+            .iter()
+            .any(|agent| agent.agent_status == AgentStatus::Working)
+    })
+}
+
 pub(super) struct WorkspacePaneRow<'a> {
     pub(super) pane_id: &'a str,
     pub(super) status: AgentStatus,
@@ -912,10 +928,10 @@ fn render_pane_rows(
             // The spine hangs below the tab name across every pane row,
             // so each tab reads as one block.
             put_segment(buffer, base_x, y, right, "│", spine_style);
-            // Signal rows carry their dot hue in the title: working yellow,
-            // done teal-green, blocked red (bold when
-            // focused). Idle and unknown stay as today: primary bold when
-            // focused, tertiary otherwise. The cursor never changes row color.
+            // Signal rows carry their glyph hue in the title: working peach,
+            // done green, blocked red (bold when focused). Idle and unknown
+            // stay as today: primary bold when focused, tertiary otherwise.
+            // The cursor never changes row color.
             let text_style = match pane_row.status {
                 AgentStatus::Working | AgentStatus::Blocked | AgentStatus::Done => Style::default()
                     .fg(upstream::status_color(pane_row.status, palette))
@@ -930,9 +946,9 @@ fn render_pane_rows(
                     }
                 }
             };
-            // Shell panes were never classified, so they carry `$` in
-            // secondary where an agent shows its status dot. The label
-            // keeps the row hue.
+            // Shell panes were never classified, so they carry a dim `$`
+            // where an agent shows its status glyph. The label keeps the
+            // row hue.
             let x = if pane_row.status == AgentStatus::Unknown {
                 put_segment(
                     buffer,
@@ -940,7 +956,7 @@ fn render_pane_rows(
                     y,
                     right,
                     "$",
-                    Style::default().fg(palette.subtext0),
+                    Style::default().fg(palette.overlay0),
                 )
             } else {
                 put_segment(
