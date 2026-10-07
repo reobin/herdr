@@ -5,7 +5,6 @@
 
 mod upstream;
 
-use std::borrow::Cow;
 use std::collections::HashMap;
 
 use ratatui::{
@@ -206,14 +205,20 @@ fn pane_row<'a>(
     }
 }
 
-/// Workspace header rows: the repo name (plus ` · label` when renamed),
+/// Workspace header rows: the repo name (plus ` / label` when renamed),
 /// then branch and ahead/behind when known, for every workspace including
-/// linked worktree children.
+/// linked worktree children. The renamed first row carries two tokens so
+/// both sides render primary with a quiet slash divider.
 pub(super) fn header_rows(workspace: &ClientShellWorkspace, _indented: bool) -> Vec<Vec<Token>> {
     let facts = upstream::workspace(workspace);
-    let mut rows = vec![vec![upstream::workspace_token(
-        header_label(&facts, _indented).into_owned(),
-    )]];
+    let (repo, name) = header_names(&facts);
+    let mut rows = match (repo, name) {
+        (Some(repo), name) => vec![vec![
+            upstream::branch_token(&repo),
+            upstream::workspace_token(name),
+        ]],
+        (None, name) => vec![vec![upstream::workspace_token(name)]],
+    };
     let mut details = Vec::new();
     if let Some(branch) = facts.branch {
         details.push(upstream::branch_token(branch));
@@ -230,21 +235,25 @@ pub(super) fn header_rows(workspace: &ClientShellWorkspace, _indented: bool) -> 
     rows
 }
 
-/// First row is always the repo name (the worktree repo, the local git repo
-/// resolving through linked checkouts, or the directory name outside repos),
-/// plus the custom label when one is set: `repo` or `repo · label`. The repo
-/// leads so sibling worktrees of one repo share one name even when checked
-/// out at different paths.
-fn header_label<'w>(facts: &WorkspaceFacts<'w>, _indented: bool) -> Cow<'w, str> {
-    let repo: Option<Cow<'w, str>> = facts
+/// Split header name into its repo context and display name. Renamed
+/// workspaces show both (`repo / label`); everything else shows one name:
+/// the worktree repo, the local git repo resolving through linked
+/// checkouts, the directory name outside repos, or the label with no repo.
+/// The repo leads so sibling worktrees of one repo share one context even
+/// when checked out at different paths.
+fn header_names(facts: &WorkspaceFacts<'_>) -> (Option<String>, String) {
+    let repo: Option<String> = facts
         .repo
-        .map(Cow::Borrowed)
-        .or_else(|| upstream::repo_name_for_cwd(facts.cwd).map(Cow::Owned))
-        .or_else(|| cwd_dir_name(facts.cwd).map(Cow::Borrowed));
-    match (repo, facts.custom_label) {
-        (Some(repo), true) => Cow::Owned(format!("{repo} · {}", facts.label)),
-        (Some(repo), false) => repo,
-        (None, _) => Cow::Borrowed(facts.label),
+        .map(str::to_owned)
+        .or_else(|| upstream::repo_name_for_cwd(facts.cwd))
+        .or_else(|| cwd_dir_name(facts.cwd).map(str::to_owned));
+    if facts.custom_label {
+        match repo {
+            Some(repo) => (Some(repo), facts.label.to_owned()),
+            None => (None, facts.label.to_owned()),
+        }
+    } else {
+        (None, repo.unwrap_or_else(|| facts.label.to_owned()))
     }
 }
 
@@ -663,6 +672,109 @@ struct PaneRowsTarget<'t> {
     highlighted: bool,
 }
 
+/// Renamed header rows carry `[Branch(repo), Workspace(label)]` so the
+/// repo renders tertiary and the label primary. Anything else renders
+/// through the generic token spans.
+fn is_slash_header(row: &[Token]) -> bool {
+    matches!(
+        row,
+        [first, second]
+            if matches!(first.kind, upstream::ResolvedTokenKind::Branch(_))
+                && matches!(second.kind, upstream::ResolvedTokenKind::Workspace(_))
+    )
+}
+
+/// First row of a renamed workspace: `repo / label` with both sides in
+/// the header style (primary, bold on focus or cursor) and a quiet
+/// tertiary divider.
+fn render_slash_header(
+    buffer: &mut Buffer,
+    x: u16,
+    y: u16,
+    width: usize,
+    row: &[Token],
+    workspace_style: Style,
+    secondary_style: Style,
+) {
+    let (repo, label) = match row {
+        [first, second] => match (&first.kind, &second.kind) {
+            (
+                upstream::ResolvedTokenKind::Branch(repo),
+                upstream::ResolvedTokenKind::Workspace(label),
+            ) => (repo.as_str(), label.as_str()),
+            _ => return,
+        },
+        _ => return,
+    };
+    let separator = " / ";
+    let separator_width = slash_header_width(separator);
+    let repo_width = slash_header_width(repo);
+    let label_width = slash_header_width(label);
+    if width < 1 + separator_width + 1 {
+        let text = slash_header_truncate(label, width);
+        Paragraph::new(Line::from(vec![Span::styled(text, workspace_style)]))
+            .render(Rect::new(x, y, width as u16, 1), buffer);
+        return;
+    }
+    let mut repo_budget = 1usize;
+    let mut label_budget = 1usize;
+    let mut remaining = width.saturating_sub(separator_width).saturating_sub(2);
+    while remaining > 0 {
+        let mut grew = false;
+        if repo_budget < repo_width {
+            repo_budget += 1;
+            remaining -= 1;
+            grew = true;
+        }
+        if remaining == 0 {
+            break;
+        }
+        if label_budget < label_width {
+            label_budget += 1;
+            remaining -= 1;
+            grew = true;
+        }
+        if !grew {
+            break;
+        }
+    }
+    let spans = vec![
+        Span::styled(slash_header_truncate(repo, repo_budget), workspace_style),
+        Span::styled(separator.to_owned(), secondary_style),
+        Span::styled(slash_header_truncate(label, label_budget), workspace_style),
+    ];
+    Paragraph::new(Line::from(spans)).render(Rect::new(x, y, width as u16, 1), buffer);
+}
+
+fn slash_header_width(text: &str) -> usize {
+    use unicode_width::UnicodeWidthStr;
+    UnicodeWidthStr::width(text)
+}
+
+fn slash_header_truncate(text: &str, max_width: usize) -> String {
+    use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+    if UnicodeWidthStr::width(text) <= max_width {
+        return text.to_owned();
+    }
+    if max_width == 0 {
+        return String::new();
+    }
+    if max_width == 1 {
+        return "…".to_owned();
+    }
+    let mut output = String::new();
+    let mut width = 0usize;
+    for ch in text.chars() {
+        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if width + ch_width > max_width.saturating_sub(1) {
+            break;
+        }
+        output.push(ch);
+        width += ch_width;
+    }
+    format!("{output}…")
+}
+
 /// Mirrors upstream's header text styling. Headers carry no tree prefix:
 /// the tree starts below them at the tab branches. The name sits one cell
 /// in so it lines up with the upstream `spaces` title. Worktree children
@@ -712,6 +824,18 @@ fn render_header(
             area.x.saturating_add(1)
         };
         let width = area.right().saturating_sub(2).saturating_sub(x);
+        if row_index == 0 && is_slash_header(row) {
+            render_slash_header(
+                buffer,
+                x,
+                y,
+                usize::from(width),
+                row,
+                workspace_style,
+                secondary_style,
+            );
+            continue;
+        }
         let spans = upstream::token_spans(
             row,
             Style::default(),
