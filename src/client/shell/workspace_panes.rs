@@ -118,7 +118,11 @@ impl<'a> WorkspacePanes<'a> {
             .map_or(&[], Vec::as_slice)
     }
 
-    /// One header row per tab group, even a lone tab, plus one row per pane.
+    /// Tab headers show only when a workspace holds more than one tab.
+    /// A lone tab skips its header, so the block reads workspace name,
+    /// branch, then directly the spine and panes. Height counts one row
+    /// per pane (plus reserved detail rows) and one header row per tab
+    /// group when headers show.
     pub(super) fn display_height(&self, workspace_id: &str) -> usize {
         sections_height(self.sections(workspace_id))
     }
@@ -130,6 +134,7 @@ impl<'a> WorkspacePanes<'a> {
 }
 
 fn sections_height(sections: &[WorkspacePaneSection<'_>]) -> usize {
+    let hide_tabs = sections.len() == 1;
     sections
         .iter()
         .map(|section| {
@@ -138,7 +143,7 @@ fn sections_height(sections: &[WorkspacePaneSection<'_>]) -> usize {
                 .iter()
                 .map(WorkspacePaneRow::display_height)
                 .sum::<usize>()
-                + 1
+                + usize::from(!hide_tabs)
         })
         .sum()
 }
@@ -833,7 +838,9 @@ fn pane_token_spans(
 /// Draws tab headers and pane rows top-down in `rect`, recording one click
 /// target per visible pane row. Tab headers align with the workspace header
 /// and pane rows indent two spaces under their tab, with summaries under
-/// their pane. A quiet spine hangs below each tab name across the full
+/// their pane. A lone tab skips its header, so its pane rows follow the
+/// workspace header directly with the spine still hanging at the tab
+/// column. A quiet spine hangs below each tab name across the full
 /// height of its pane rows. The spine follows its tab: primary while the
 /// tab holds focus, quiet otherwise.
 fn render_pane_rows(
@@ -862,7 +869,9 @@ fn render_pane_rows(
     let right = rect.right().saturating_sub(2);
     // Tabs align with the workspace header; panes indent two spaces under
     // their tab with a quiet spine hanging below the tab name across the
-    // full height of the tab's pane rows.
+    // full height of the tab's pane rows. A lone tab skips its header so
+    // the block reads workspace name, branch, then directly spine + panes.
+    let hide_tabs = sections.len() == 1;
     let base_x = rect.x.saturating_add(if entry.indented { 7 } else { 1 });
     let tab_x = base_x;
     let pane_x = tab_x.saturating_add(2);
@@ -880,20 +889,22 @@ fn render_pane_rows(
         } else {
             Style::default().fg(palette.overlay0)
         };
-        let tab_style = if section.tab_focused && show_focus {
-            Style::default().fg(palette.text)
-        } else {
-            Style::default().fg(palette.overlay0)
-        };
-        put_text(
-            buffer,
-            tab_x,
-            y,
-            right.saturating_sub(tab_x),
-            section.tab_label,
-            tab_style,
-        );
-        y = y.saturating_add(1);
+        if !hide_tabs {
+            let tab_style = if section.tab_focused && show_focus {
+                Style::default().fg(palette.text)
+            } else {
+                Style::default().fg(palette.overlay0)
+            };
+            put_text(
+                buffer,
+                tab_x,
+                y,
+                right.saturating_sub(tab_x),
+                section.tab_label,
+                tab_style,
+            );
+            y = y.saturating_add(1);
+        }
         for pane_row in section.rows.iter() {
             if y >= rect.bottom() {
                 return;

@@ -186,14 +186,14 @@ fn panes_layout_renders_headers_gap_indent_and_pane_text_at_fixed_geometry() {
             "",
             " repo",
             " main",
-            " 1",
             " │ $ shell",
             " │ $ shell",
             "",
             " ws_2",
-            " editor",
             " │ ● herdr / pi",
             " │",
+            "",
+            "",
             "",
             "",
             "",
@@ -209,30 +209,30 @@ fn panes_layout_renders_headers_gap_indent_and_pane_text_at_fixed_geometry() {
             .map(|hit| (hit.workspace_id.as_str(), hit.rect))
             .collect::<Vec<_>>(),
         vec![
-            ("ws_1", Rect::new(0, 2, 25, 5)),
-            ("ws_2", Rect::new(0, 8, 25, 4)),
+            ("ws_1", Rect::new(0, 2, 25, 4)),
+            ("ws_2", Rect::new(0, 7, 25, 3)),
         ],
     );
     assert_eq!(
         state.hits.workspace_panes,
         vec![
             (
-                Rect::new(0, 5, 25, 1),
+                Rect::new(0, 4, 25, 1),
                 ClientEndpointId::Local,
                 "pane_1".to_owned()
             ),
             (
-                Rect::new(0, 6, 25, 1),
+                Rect::new(0, 5, 25, 1),
                 ClientEndpointId::Local,
                 "pane_2".to_owned()
             ),
             (
-                Rect::new(0, 10, 25, 1),
+                Rect::new(0, 8, 25, 1),
                 ClientEndpointId::Local,
                 "pane_3".to_owned()
             ),
             (
-                Rect::new(0, 11, 25, 1),
+                Rect::new(0, 9, 25, 1),
                 ClientEndpointId::Local,
                 "pane_3".to_owned()
             ),
@@ -245,9 +245,9 @@ fn panes_layout_renders_headers_gap_indent_and_pane_text_at_fixed_geometry() {
     let buffer = frame.to_ratatui_buffer().expect("buffer");
     let bold = |x: u16, y: u16| buffer[(x, y)].modifier.contains(Modifier::BOLD);
     assert!(bold(1, 2), "focused workspace header is bold");
-    assert!(!bold(1, 8), "unfocused workspace header is not bold");
+    assert!(!bold(1, 7), "unfocused workspace header is not bold");
     assert_eq!(
-        buffer[(3, 10)].fg,
+        buffer[(3, 8)].fg,
         state.config.palette.yellow,
         "working icon"
     );
@@ -319,13 +319,12 @@ fn navigate_selection_marks_type_with_a_block_fill() {
         "branch stays tertiary when focused"
     );
 
-    // Tabs sit with the branch line in every state, cursor included.
-    let selected_tab = row_of(" editor");
-    assert_eq!(buffer[(1, selected_tab)].fg, palette.overlay0);
-    assert!(!buffer[(1, selected_tab)].modifier.contains(Modifier::BOLD));
-    let focused_tab = row_of(" 1");
-    assert_eq!(buffer[(1, focused_tab)].fg, palette.text);
-    assert!(!buffer[(1, focused_tab)].modifier.contains(Modifier::BOLD));
+    // A lone tab skips its header, so pane rows follow the branch line
+    // directly. Multi-tab workspaces keep one header row per tab.
+    assert!(
+        rows.iter().all(|row| row != " editor" && row != " 1"),
+        "lone tabs hide their header: {rows:?}"
+    );
 
     // Idle rows sit with the branch line while the focused pane goes
     // primary and bold. Signal rows carry their dot hue in the title.
@@ -545,7 +544,7 @@ fn classic_mode_keeps_the_agent_section_and_records_no_pane_rows() {
 fn pane_row_click_focuses_the_pane_instead_of_pressing_the_workspace() {
     let mut state = panes_state(&panes_config(), two_workspace_snapshot());
     state.compose(100, 16).expect("panes sidebar");
-    let outcome = left_click(&mut state, 3, 6);
+    let outcome = left_click(&mut state, 3, 5);
     assert!(state.workspace_press.is_none());
     let [ClientShellAction::Endpoint { request, .. }] = &outcome.actions[..] else {
         panic!("pane row click should focus the pane");
@@ -560,7 +559,7 @@ fn pane_row_click_focuses_the_pane_instead_of_pressing_the_workspace() {
 fn header_click_still_presses_the_workspace() {
     let mut state = panes_state(&panes_config(), two_workspace_snapshot());
     state.compose(100, 16).expect("panes sidebar");
-    left_click(&mut state, 3, 8);
+    left_click(&mut state, 3, 7);
     assert_eq!(
         state
             .workspace_press
@@ -637,8 +636,8 @@ fn machine_sidebar_lists_pane_rows_under_each_machine() {
         assert_eq!(rows[rect.y as usize], "   │ $ shell", "{rows:?}");
         assert_eq!(
             rows[rect.y as usize - 1],
-            "   1",
-            "tab header above: {rows:?}"
+            "   main",
+            "lone tab hides its header, so the branch sits above: {rows:?}"
         );
     }
     assert_eq!(state.hits.sidebar_section_divider, Rect::default());
@@ -754,6 +753,23 @@ fn panes_branch_within_a_tab_and_group_by_tab_bar_order() {
         vec![("1", true, 3), ("servers", false, 1)]
     );
     assert_eq!(workspace_pane_display_height(&snapshot, "ws_1"), 6);
+}
+
+#[test]
+fn lone_tab_skips_its_header_and_keeps_the_spine() {
+    // One tab: name and branch, then directly spine + panes.
+    let mut state = panes_state(&panes_config(), two_workspace_snapshot());
+    let frame = state.compose(100, 16).expect("panes sidebar");
+    let rows = sidebar_rows(&frame);
+    assert_eq!(
+        rows[2..6],
+        [" repo", " main", " │ $ shell", " │ $ shell"],
+        "{rows:?}"
+    );
+    assert_eq!(
+        workspace_pane_display_height(&two_workspace_snapshot(), "ws_1"),
+        2
+    );
 }
 
 #[test]
@@ -1125,7 +1141,7 @@ fn tall_workspace_clips_pane_rows_to_the_sidebar_body() {
     let frame = state.compose(100, 14).expect("short sidebar");
     let body = state.hits.workspace_body;
     let hits = &state.hits.workspace_panes;
-    assert_eq!(hits.len(), usize::from(body.height) - 3);
+    assert_eq!(hits.len(), usize::from(body.height) - 2);
     assert!(hits
         .iter()
         .all(|(rect, _, _)| rect.y >= body.y && rect.y < body.bottom()));
@@ -1161,15 +1177,13 @@ fn pane_rows_under_worktree_children_indent_with_spaces() {
         .position(|row| row == "       repo")
         .expect("first child header");
     assert_eq!(
-        rows[start..start + 8],
+        rows[start..start + 6],
         [
             "       repo",
             "       worktree/ws_2",
-            "       1",
             "       │ $ shell",
             "       repo",
             "       worktree/ws_3",
-            "       1",
             "       │ $ shell",
         ],
         "children hug the parent with no gap: {rows:?}"
