@@ -73,6 +73,9 @@ pub(super) fn pane_text_config(
 pub(super) struct Entry {
     pub(super) index: usize,
     pub(super) indented: bool,
+    // Retained for upstream parity; the space-only layout no longer pipes
+    // worktree siblings together.
+    #[allow(dead_code)]
     pub(super) last_child: bool,
 }
 
@@ -177,7 +180,7 @@ pub(super) struct AgentPaneText {
 
 /// Resolves the agent rows into the first line plus the summary line, which
 /// is `None` when the layout has no `$summary`. The status icon, machine, workspace, and tab tokens drop out of the
-/// first line because the tree glyph, status column, and enclosing workspace
+/// first line because the status column and enclosing workspace
 /// and tab headers already show them.
 pub(super) fn agent_tokens(
     agent: &AgentFacts<'_>,
