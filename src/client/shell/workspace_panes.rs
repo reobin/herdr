@@ -39,7 +39,6 @@ pub(super) struct WorkspacePaneRow<'a> {
     /// arrives; `None` for shell panes and layouts without `$summary`.
     pub(super) detail: Option<Vec<Token>>,
     pub(super) focused: bool,
-    pub(super) branch: PaneBranch,
 }
 
 impl WorkspacePaneRow<'_> {
@@ -52,24 +51,6 @@ pub(super) struct WorkspacePaneSection<'a> {
     pub(super) tab_label: &'a str,
     pub(super) tab_focused: bool,
     pub(super) rows: Vec<WorkspacePaneRow<'a>>,
-}
-
-/// Tree glyph joining a pane row to its tab header.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum PaneBranch {
-    Single,
-    First,
-    Middle,
-    Last,
-}
-
-impl PaneBranch {
-    pub(super) fn corner(self) -> &'static str {
-        match self {
-            PaneBranch::Single | PaneBranch::Last => "└",
-            PaneBranch::First | PaneBranch::Middle => "├",
-        }
-    }
 }
 
 /// Pane rows for every workspace in one snapshot, built once per frame so the
@@ -111,14 +92,7 @@ impl<'a> WorkspacePanes<'a> {
                 let mut sections: Vec<WorkspacePaneSection<'a>> = Vec::new();
                 for (index, pane) in panes.iter().enumerate() {
                     let first = index == 0 || panes[index - 1].tab_id != pane.tab_id;
-                    let last = index + 1 == panes.len() || panes[index + 1].tab_id != pane.tab_id;
-                    let branch = match (first, last) {
-                        (true, true) => PaneBranch::Single,
-                        (true, false) => PaneBranch::First,
-                        (false, true) => PaneBranch::Last,
-                        (false, false) => PaneBranch::Middle,
-                    };
-                    let row = pane_row(pane, agents.get(pane.pane_id), &agents_config, branch);
+                    let row = pane_row(pane, agents.get(pane.pane_id), &agents_config);
                     match sections.last_mut() {
                         Some(section) if !first => section.rows.push(row),
                         _ => {
@@ -173,7 +147,6 @@ fn pane_row<'a>(
     pane: &PaneFacts<'a>,
     agent: Option<&AgentFacts<'a>>,
     agents_config: &AgentsSidebarConfig,
-    branch: PaneBranch,
 ) -> WorkspacePaneRow<'a> {
     let pane_label = pane.label.filter(|label| !label.is_empty());
     // A pane with no detected agent was never classified, so its status is
@@ -188,7 +161,6 @@ fn pane_row<'a>(
             tokens: Vec::new(),
             detail: None,
             focused: pane.focused,
-            branch,
         };
     };
     let label = agent.title.or(pane_label);
@@ -201,7 +173,6 @@ fn pane_row<'a>(
         tokens: text.line,
         detail: text.detail,
         focused: pane.focused,
-        branch,
     }
 }
 
@@ -630,7 +601,6 @@ impl<'a> Active<'a> {
         let rows = header_rows(block.workspace, entry.indented);
         let palette = upstream::palette(self.config);
         let sections = self.sections(block.machine, facts.workspace_id);
-        let highlighted = (show_focus && facts.focused) || selected || dragged;
         render_header(
             buffer,
             rect,
@@ -653,7 +623,6 @@ impl<'a> Active<'a> {
             endpoint_id,
             show_focus,
             summary_lift: selected,
-            highlighted,
         };
         render_pane_rows(buffer, rows_area, sections, target, self.config, hits);
     }
@@ -668,8 +637,6 @@ struct PaneRowsTarget<'t> {
     /// Workspace or tab focus alone never does; only the focused pane's
     /// own summary steps up with it.
     summary_lift: bool,
-    /// Workspace focus, cursor, or drag: bolds the filled pipe run.
-    highlighted: bool,
 }
 
 /// Renamed header rows carry `[Branch(repo), Workspace(label)]` so the
@@ -775,10 +742,9 @@ fn slash_header_truncate(text: &str, max_width: usize) -> String {
     format!("{output}…")
 }
 
-/// Mirrors upstream's header text styling. Headers carry no tree prefix:
-/// the tree starts below them at the tab branches. The name sits one cell
+/// Mirrors upstream's header text styling. The name sits one cell
 /// in so it lines up with the upstream `spaces` title. Worktree children
-/// keep their upstream tree prefix untouched.
+/// indent by the same offset, with spaces.
 fn render_header(
     buffer: &mut Buffer,
     area: Rect,
@@ -805,24 +771,7 @@ fn render_header(
         if y >= area.bottom() {
             break;
         }
-        let x = if entry.indented {
-            let prefix = match (row_index == 0, entry.last_child) {
-                (true, true) => "   └─ ",
-                (true, false) => "   ├─ ",
-                (false, true) => "      ",
-                (false, false) => "   │  ",
-            };
-            put_segment(
-                buffer,
-                area.x.saturating_add(1),
-                y,
-                area.right(),
-                prefix,
-                Style::default().fg(palette.overlay0),
-            )
-        } else {
-            area.x.saturating_add(1)
-        };
+        let x = area.x.saturating_add(if entry.indented { 7 } else { 1 });
         let width = area.right().saturating_sub(2).saturating_sub(x);
         if row_index == 0 && is_slash_header(row) {
             render_slash_header(
@@ -849,32 +798,12 @@ fn render_header(
     }
 }
 
-/// Pipes above the focused pane fill with the selected color. Bold follows
-/// the old group bar rule: workspace focus, navigate cursor, or drag.
-fn pipe_run_style(palette: &Palette, fill: bool, highlighted: bool) -> Style {
-    if fill {
-        Style::default()
-            .fg(palette.text)
-            .add_modifier(if highlighted {
-                Modifier::BOLD
-            } else {
-                Modifier::empty()
-            })
-    } else {
-        Style::default().fg(palette.overlay0)
-    }
-}
-
 /// Draws tab headers and pane rows top-down in `rect`, recording one click
-/// target per visible pane row. Two pipe levels replace the old group bar:
-/// tab branches hang off the block edge and each tab pipes down to its own
-/// pane branches; summary rows sit under both continuations. Within the
-/// focused tab, pipes at or above the focused pane fill with the selected
-/// color; only the vertical cell fills, so the horizontal arm keeps the
-/// row's own signal hue. The tab holding the focus fills its whole branch
-/// instead, while earlier tabs fill only the vertical corner cell. The
-/// outer trunk stays lit while transiting earlier tabs but goes dry
-/// inside the focused tab, where the branch and tab pipe take over.
+/// target per visible pane row. Tab headers align with the workspace header
+/// and pane rows indent two spaces under their tab, with summaries under
+/// their pane. A quiet spine hangs below each tab name across the full
+/// height of its pane rows. The spine follows its tab: primary while the
+/// tab holds focus, quiet otherwise.
 fn render_pane_rows(
     buffer: &mut Buffer,
     rect: Rect,
@@ -888,7 +817,6 @@ fn render_pane_rows(
         endpoint_id,
         show_focus,
         summary_lift,
-        highlighted,
     } = target;
     let palette = upstream::palette(config);
     let emphasis = |focused: bool| {
@@ -900,86 +828,49 @@ fn render_pane_rows(
     };
     let record_hits = upstream::mouse_capture(config);
     let right = rect.right().saturating_sub(2);
-    // Outer pipe column, one cell in so the tree lines up with the
-    // upstream `spaces` title. Tab branches hang off it and pane rows
-    // continue it. Worktree children keep their tree offset on top.
-    let pipe_x = rect.x.saturating_add(if entry.indented { 7 } else { 1 });
-    let quiet_pipe = Style::default().fg(palette.overlay0);
-    // Tree order of the focused pane, so pipes above it within its tab can
-    // fill. `None` on background machines and workspaces: nothing fills.
-    let focused_pos: Option<(usize, usize)> = show_focus
-        .then(|| {
-            sections.iter().enumerate().find_map(|(s, section)| {
-                section
-                    .rows
-                    .iter()
-                    .position(|row| row.focused)
-                    .map(|r| (s, r))
-            })
-        })
-        .flatten();
+    // Tabs align with the workspace header; panes indent two spaces under
+    // their tab with a quiet spine hanging below the tab name across the
+    // full height of the tab's pane rows.
+    let base_x = rect.x.saturating_add(if entry.indented { 7 } else { 1 });
+    let tab_x = base_x;
+    let pane_x = tab_x.saturating_add(2);
     let mut y = rect.y;
-    for (s_idx, section) in sections.iter().enumerate() {
+    for section in sections.iter() {
         if y >= rect.bottom() {
             return;
         }
-        render_sibling_pipe(buffer, rect, y, entry, palette);
-        let tab_last = s_idx + 1 == sections.len();
-        // The tab corner holds the vertical trunk, so it fills on every
-        // tab at or above the focused one. The arm only fills for the tab
-        // holding the focus: other arms lead away from the selection.
-        let tab_fill = focused_pos.is_some_and(|(fs, _)| s_idx <= fs);
-        let tab_arm_fill = focused_pos.is_some_and(|(fs, _)| s_idx == fs);
         // The selected tab goes primary without bold; the cursor never
-        // lifts tabs, and unfocused ones sit with the branch line.
+        // lifts tabs, and unfocused ones sit with the branch line. The
+        // spine follows its tab: primary while the tab holds focus, quiet
+        // otherwise, never bold either way.
+        let spine_style = if section.tab_focused && show_focus {
+            Style::default().fg(palette.text)
+        } else {
+            Style::default().fg(palette.overlay0)
+        };
         let tab_style = if section.tab_focused && show_focus {
             Style::default().fg(palette.text)
         } else {
             Style::default().fg(palette.overlay0)
         };
-        // Tab branches hang off a continuous outer trunk rooted at the
-        // workspace header: earlier tabs tee off with `├` so the line
-        // runs up to the header, the last one closes with `└`. A lone
-        // tab stays `└`.
-        put_segment(
-            buffer,
-            pipe_x,
-            y,
-            right,
-            if tab_last { "└" } else { "├" },
-            pipe_run_style(palette, tab_fill, highlighted),
-        );
-        put_segment(
-            buffer,
-            pipe_x.saturating_add(1),
-            y,
-            right,
-            "─",
-            if tab_arm_fill {
-                pipe_run_style(palette, true, highlighted)
-            } else {
-                quiet_pipe
-            },
-        );
-        // Glued to the arm: the branch reads as one continuous line,
-        // like pane branches run into their status icon.
-        let tab_label_x = pipe_x.saturating_add(2);
         put_text(
             buffer,
-            tab_label_x,
+            tab_x,
             y,
-            right.saturating_sub(tab_label_x),
+            right.saturating_sub(tab_x),
             section.tab_label,
             tab_style,
         );
         y = y.saturating_add(1);
-        for (r_idx, pane_row) in section.rows.iter().enumerate() {
+        for pane_row in section.rows.iter() {
             if y >= rect.bottom() {
                 return;
             }
-            render_sibling_pipe(buffer, rect, y, entry, palette);
-            // Signal rows carry their dot hue in the title and the tree
-            // pipe: working yellow, done teal-green, blocked red (bold when
+            // The spine hangs below the tab name across every pane row,
+            // so each tab reads as one block.
+            put_segment(buffer, base_x, y, right, "│", spine_style);
+            // Signal rows carry their dot hue in the title: working yellow,
+            // done teal-green, blocked red (bold when
             // focused). Idle and unknown stay as today: primary bold when
             // focused, tertiary otherwise. The cursor never changes row color.
             let text_style = match pane_row.status {
@@ -996,49 +887,14 @@ fn render_pane_rows(
                     }
                 }
             };
-            let pane_fill = focused_pos.is_some_and(|(fs, fr)| s_idx == fs && r_idx <= fr);
-            // The outer trunk feeds tabs, not panes: it stays lit while
-            // transiting earlier tabs but goes dry inside the focused tab,
-            // where the branch and tab pipe take over.
-            let outer_fill = focused_pos.is_some_and(|(fs, _)| s_idx < fs);
-            let mut x = pipe_x;
-            if !tab_last {
-                x = put_segment(
-                    buffer,
-                    x,
-                    y,
-                    right,
-                    "│",
-                    pipe_run_style(palette, outer_fill, highlighted),
-                );
-                x = x.saturating_add(1);
-            } else {
-                x = x.saturating_add(2);
-            }
-            // Split the branch: the vertical corner fills above the
-            // selection while the horizontal arm keeps the row hue.
-            let corner = pane_row.branch.corner();
-            x = put_segment(
-                buffer,
-                x,
-                y,
-                right,
-                corner,
-                if pane_fill {
-                    pipe_run_style(palette, true, highlighted)
-                } else {
-                    text_style
-                },
-            );
-            x = put_segment(buffer, x, y, right, "─", text_style);
-            // Unknown carries no signal (detection never ran), so it leaves a
-            // blank instead of gluing a second dot onto the branch.
-            x = if pane_row.status == AgentStatus::Unknown {
-                put_segment(buffer, x, y, right, " ", Style::default())
+            // Shell panes were never classified, so they carry `$` in the
+            // row hue where an agent shows its status dot.
+            let x = if pane_row.status == AgentStatus::Unknown {
+                put_segment(buffer, pane_x, y, right, "$", text_style)
             } else {
                 put_segment(
                     buffer,
-                    x,
+                    pane_x,
                     y,
                     right,
                     upstream::status_icon(pane_row.status, config),
@@ -1047,7 +903,7 @@ fn render_pane_rows(
             };
             if pane_row.tokens.is_empty() {
                 // A shell row's label is its callsign, so the kind prefix
-                // would only repeat what the blank status column says. Agent
+                // would only repeat what the `$` marker says. Agent
                 // rows that resolve to nothing keep `kind · label`.
                 let text = match (pane_row.label, pane_row.kind) {
                     (Some(label), "shell") => format!(" {label}"),
@@ -1082,40 +938,9 @@ fn render_pane_rows(
                 if y >= rect.bottom() {
                     return;
                 }
-                render_sibling_pipe(buffer, rect, y, entry, palette);
-                // Detail rows continue the outer pipe while later tabs
-                // follow, and the tab pipe while later panes follow, so a
-                // summary always sits under its pipes. The trunk fills on
-                // rows above the focused tab's first pane; the tab pipe
-                // only strictly above the selection within the focused tab.
-                // (Every detail row sits below its pane, so a focused tab
-                // never fills a detail outer.)
-                let outer_detail_fill = focused_pos.is_some_and(|(fs, _)| s_idx < fs);
-                let detail_fill = focused_pos.is_some_and(|(fs, fr)| s_idx == fs && r_idx < fr);
-                if !tab_last {
-                    put_segment(
-                        buffer,
-                        pipe_x,
-                        y,
-                        right,
-                        "│",
-                        pipe_run_style(palette, outer_detail_fill, highlighted),
-                    );
-                }
-                if matches!(pane_row.branch, PaneBranch::First | PaneBranch::Middle) {
-                    put_segment(
-                        buffer,
-                        pipe_x.saturating_add(2),
-                        y,
-                        right,
-                        "│",
-                        if detail_fill {
-                            pipe_run_style(palette, true, highlighted)
-                        } else {
-                            text_style
-                        },
-                    );
-                }
+                // The spine runs through summary rows too, so the line
+                // spans the tab's full height.
+                put_segment(buffer, base_x, y, right, "│", spine_style);
                 if !detail.is_empty() {
                     let width = right.saturating_sub(x);
                     let mut spans = vec![Span::raw(" ")];
@@ -1148,20 +973,5 @@ fn render_pane_rows(
                 y = y.saturating_add(1);
             }
         }
-    }
-}
-
-/// Continues the worktree tree line past a child that has later siblings, as
-/// its own header row does. Offset one cell for the tree pipe column.
-fn render_sibling_pipe(buffer: &mut Buffer, rect: Rect, y: u16, entry: &Entry, palette: &Palette) {
-    if entry.indented && !entry.last_child {
-        put_segment(
-            buffer,
-            rect.x.saturating_add(1),
-            y,
-            rect.right(),
-            "   │",
-            Style::default().fg(palette.overlay0),
-        );
     }
 }
