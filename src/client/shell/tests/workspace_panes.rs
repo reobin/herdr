@@ -152,6 +152,19 @@ fn header_name(workspace: &ClientShellWorkspace, indented: bool) -> String {
         .expect("workspace token")
 }
 
+fn header_title(workspace: &ClientShellWorkspace, indented: bool) -> String {
+    header_rows(workspace, indented)[0]
+        .iter()
+        .filter_map(|token| match &token.kind {
+            ResolvedTokenKind::Branch(name) | ResolvedTokenKind::Workspace(name) => {
+                Some(name.clone())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" / ")
+}
+
 fn left_click(state: &mut ClientShellState, column: u16, row: u16) -> ClientShellInput {
     state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
@@ -793,20 +806,68 @@ fn renamed_workspace_headers_keep_their_automatic_name_as_context() {
         label: "herdr".into(),
         is_linked_worktree: false,
     });
-    assert_eq!(header_name(&top, false), "herdr · review");
+    assert_eq!(header_name(&top, false), "review");
+    assert_eq!(header_title(&top, false), "herdr / review");
+    assert_eq!(
+        header_rows(&top, false)[0]
+            .iter()
+            .map(|token| &token.kind)
+            .collect::<Vec<_>>(),
+        vec![
+            &ResolvedTokenKind::Branch("herdr".into()),
+            &ResolvedTokenKind::Workspace("review".into()),
+        ]
+    );
 
     let mut child = top.clone();
     child.branch = Some("worktree/feat".into());
-    assert_eq!(header_name(&child, true), "herdr · review");
+    assert_eq!(header_name(&child, true), "review");
+    assert_eq!(header_title(&child, true), "herdr / review");
 
     let mut bare = top.clone();
     bare.branch = None;
     bare.worktree = None;
     bare.new_workspace_cwd = "/repo/scratch".into();
-    assert_eq!(header_name(&bare, false), "scratch · review");
+    assert_eq!(header_name(&bare, false), "review");
+    assert_eq!(header_title(&bare, false), "scratch / review");
 
     bare.custom_label = false;
     assert_eq!(header_name(&bare, false), "scratch");
+    assert_eq!(header_title(&bare, false), "scratch");
+}
+
+#[test]
+fn renamed_header_renders_slash_with_both_sides_primary() {
+    let mut snapshot = snapshot();
+    snapshot.workspaces[0].label = "manifest-order".into();
+    snapshot.workspaces[0].custom_label = true;
+    snapshot.workspaces[0].focused = true;
+    let mut state = panes_state(&panes_config(), snapshot);
+    let frame = state.compose(100, 16).expect("renamed sidebar");
+    let rows = sidebar_rows(&frame);
+    let header = rows
+        .iter()
+        .position(|row| row.contains("manifest-order"))
+        .expect("renamed header row") as u16;
+    assert_eq!(rows[header as usize], " repo / manifest-order");
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    let palette = &state.config.palette;
+    assert_eq!(buffer[(2, header)].fg, palette.text);
+    assert!(
+        buffer[(2, header)].modifier.contains(Modifier::BOLD),
+        "focused repo is bold"
+    );
+    assert_eq!(buffer[(6, header)].fg, palette.overlay0, "slash divider");
+    assert!(
+        !buffer[(6, header)].modifier.contains(Modifier::BOLD),
+        "divider stays quiet"
+    );
+    // Label starts after ` repo / ` (1 + 4 + 3).
+    assert_eq!(buffer[(8, header)].fg, palette.text);
+    assert!(
+        buffer[(8, header)].modifier.contains(Modifier::BOLD),
+        "focused label is bold"
+    );
 }
 
 #[test]
@@ -851,7 +912,8 @@ fn header_resolves_base_repo_through_linked_checkout_without_worktree_field() {
 
     ws.custom_label = true;
     ws.label = "plan-dependencies".into();
-    assert_eq!(header_name(&ws, false), "ordering-web · plan-dependencies");
+    assert_eq!(header_name(&ws, false), "plan-dependencies");
+    assert_eq!(header_title(&ws, false), "ordering-web / plan-dependencies");
 
     std::fs::remove_dir_all(&tmp).unwrap();
 }
