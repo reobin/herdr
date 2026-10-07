@@ -192,7 +192,7 @@ fn panes_layout_renders_headers_gap_indent_and_pane_text_at_fixed_geometry() {
             "",
             " ws_2",
             " editor",
-            " │ ● herdr · pi",
+            " │ ● herdr / pi",
             " │",
             "",
             "",
@@ -333,7 +333,7 @@ fn navigate_selection_marks_type_with_a_block_fill() {
     let focused_pane = row_of(" │ $ shell");
     assert_eq!(buffer[(5, focused_pane)].fg, palette.text);
     assert!(buffer[(5, focused_pane)].modifier.contains(Modifier::BOLD));
-    let working_pane = row_of(" │ ● herdr · pi");
+    let working_pane = row_of(" │ ● herdr / pi");
     assert_eq!(buffer[(6, working_pane)].fg, palette.yellow);
     assert!(!buffer[(6, working_pane)].modifier.contains(Modifier::BOLD));
     assert_eq!(buffer[(3, working_pane)].fg, palette.yellow);
@@ -362,7 +362,7 @@ fn agent_rows_follow_activity_detail_lifts_with_selection() {
 
     let pane = rows
         .iter()
-        .position(|row| row.contains("herdr · pi"))
+        .position(|row| row.contains("herdr / pi"))
         .expect("pane row") as u16;
     assert_eq!(
         buffer[(6, pane)].fg,
@@ -460,7 +460,7 @@ fn idle_agent_rows_sink_to_tertiary() {
     let palette = &state.config.palette;
     let pane = rows
         .iter()
-        .position(|row| row.contains("herdr · pi"))
+        .position(|row| row.contains("herdr / pi"))
         .expect("pane row") as u16;
     assert_eq!(buffer[(6, pane)].fg, palette.overlay0);
     assert_eq!(
@@ -491,7 +491,7 @@ fn signal_statuses_paint_title_and_dot_with_the_signal_hue() {
         };
         let pane = rows
             .iter()
-            .position(|row| row.contains("herdr · pi"))
+            .position(|row| row.contains("herdr / pi"))
             .expect("pane row") as u16;
         assert_eq!(buffer[(6, pane)].fg, expected, "{status:?} title");
         let dot = if status == AgentStatus::Idle {
@@ -520,7 +520,7 @@ fn signal_statuses_paint_title_and_dot_with_the_signal_hue() {
     let palette = &state.config.palette;
     let pane = rows
         .iter()
-        .position(|row| row.contains("herdr · pi"))
+        .position(|row| row.contains("herdr / pi"))
         .expect("pane row") as u16;
     assert_eq!(buffer[(6, pane)].fg, palette.teal, "done title");
     assert_eq!(buffer[(3, pane)].fg, palette.teal, "done dot");
@@ -924,7 +924,7 @@ fn pane_row_text(config: &Config) -> String {
 
 #[test]
 fn default_agent_layout_shows_label_then_harness() {
-    assert_eq!(pane_row_text(&panes_config()), " │ ● herdr · pi");
+    assert_eq!(pane_row_text(&panes_config()), " │ ● herdr / pi");
 }
 
 #[test]
@@ -937,7 +937,7 @@ fn default_agent_layout_puts_reported_summary_on_its_own_row() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], " │ ● herdr · pi");
+    assert_eq!(rows[rect.y as usize], " │ ● herdr / pi");
     assert_eq!(rows[rect.y as usize + 1], " │   auth");
 }
 
@@ -953,7 +953,7 @@ fn harness_label_wins_over_slug_agent_name() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], " │ ● herdr · claude");
+    assert_eq!(rows[rect.y as usize], " │ ● herdr / claude");
 }
 
 #[test]
@@ -966,7 +966,7 @@ fn missing_summary_falls_back_to_terminal_title() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], " │ ● herdr · pi");
+    assert_eq!(rows[rect.y as usize], " │ ● herdr / pi");
     assert_eq!(rows[rect.y as usize + 1], " │   CON-4665 explain …");
 }
 
@@ -992,7 +992,7 @@ fn agent_row_without_summary_reserves_a_blank_second_row() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], " │ ● herdr · pi");
+    assert_eq!(rows[rect.y as usize], " │ ● herdr / pi");
     assert_eq!(rows[rect.y as usize + 1], " │");
     assert_eq!(state.hits.workspace_panes.len(), 2);
     assert!(
@@ -1026,7 +1026,7 @@ fn tab_spine_spans_the_full_height_of_its_pane_rows() {
             " repo",
             " main",
             " 1",
-            " │ ● herdr · pi",
+            " │ ● herdr / pi",
             " │",
             " │ $ shell",
             " servers",
@@ -1087,7 +1087,7 @@ fn custom_agent_layout_flattens_and_drops_tokens_the_layout_shows() {
         ],
         vec![AgentSidebarToken::StateText],
     ];
-    assert_eq!(pane_row_text(&config), " │ ● pi · working");
+    assert_eq!(pane_row_text(&config), " │ ● pi / working");
 }
 
 #[test]
@@ -1101,7 +1101,7 @@ fn custom_agent_layout_without_summary_reserves_no_second_row() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], " │ ● pi · herdr");
+    assert_eq!(rows[rect.y as usize], " │ ● pi / herdr");
     assert_eq!(state.hits.workspace_panes.len(), 2);
     assert_eq!(state.hits.workspace_panes[1].0.y, rect.y + 1);
 }
@@ -1110,7 +1110,7 @@ fn custom_agent_layout_without_summary_reserves_no_second_row() {
 fn custom_agent_layout_that_resolves_empty_falls_back_to_agent_and_title() {
     let mut config = panes_config();
     config.ui.sidebar.agents.rows = vec![vec![AgentSidebarToken::Machine]];
-    assert_eq!(pane_row_text(&config), " │ ● pi · herdr");
+    assert_eq!(pane_row_text(&config), " │ ● pi / herdr");
 }
 
 #[test]

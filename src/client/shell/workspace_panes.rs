@@ -32,7 +32,7 @@ pub(super) struct WorkspacePaneRow<'a> {
     pub(super) kind: &'a str,
     pub(super) label: Option<&'a str>,
     /// Agent text flattened to one line. Empty for shell panes and for
-    /// layouts that resolve to nothing, which fall back to `kind · label`.
+    /// layouts that resolve to nothing, which fall back to `kind / label`.
     pub(super) tokens: Vec<Token>,
     /// Reserved summary line for agent panes whose layout has a `$summary`.
     /// `Some` even without a reported summary, so rows never shift when one
@@ -798,6 +798,38 @@ fn render_header(
     }
 }
 
+/// Agent pane rows join tokens with ` / ` where upstream uses ` · `,
+/// matching the workspace `repo / label` header. Shell rows carry no
+/// separator, so the swap only ever touches agent rows.
+fn pane_token_spans(
+    tokens: &[Token],
+    status_style: Style,
+    workspace_style: Style,
+    secondary_style: Style,
+    custom_style: Style,
+    palette: &Palette,
+    max_width: usize,
+) -> Vec<Span<'static>> {
+    upstream::token_spans(
+        tokens,
+        status_style,
+        workspace_style,
+        secondary_style,
+        custom_style,
+        palette,
+        max_width,
+    )
+    .into_iter()
+    .map(|span| {
+        if span.content == " · " {
+            Span::styled(" / ".to_owned(), span.style)
+        } else {
+            span
+        }
+    })
+    .collect()
+}
+
 /// Draws tab headers and pane rows top-down in `rect`, recording one click
 /// target per visible pane row. Tab headers align with the workspace header
 /// and pane rows indent two spaces under their tab, with summaries under
@@ -887,10 +919,18 @@ fn render_pane_rows(
                     }
                 }
             };
-            // Shell panes were never classified, so they carry `$` in the
-            // row hue where an agent shows its status dot.
+            // Shell panes were never classified, so they carry `$` in
+            // secondary where an agent shows its status dot. The label
+            // keeps the row hue.
             let x = if pane_row.status == AgentStatus::Unknown {
-                put_segment(buffer, pane_x, y, right, "$", text_style)
+                put_segment(
+                    buffer,
+                    pane_x,
+                    y,
+                    right,
+                    "$",
+                    Style::default().fg(palette.subtext0),
+                )
             } else {
                 put_segment(
                     buffer,
@@ -904,17 +944,17 @@ fn render_pane_rows(
             if pane_row.tokens.is_empty() {
                 // A shell row's label is its callsign, so the kind prefix
                 // would only repeat what the `$` marker says. Agent
-                // rows that resolve to nothing keep `kind · label`.
+                // rows that resolve to nothing keep `kind / label`.
                 let text = match (pane_row.label, pane_row.kind) {
                     (Some(label), "shell") => format!(" {label}"),
-                    (Some(label), kind) => format!(" {kind} · {label}"),
+                    (Some(label), kind) => format!(" {kind} / {label}"),
                     (None, kind) => format!(" {kind}"),
                 };
                 put_text(buffer, x, y, right.saturating_sub(x), &text, text_style);
             } else {
                 let width = right.saturating_sub(x);
                 let mut spans = vec![Span::raw(" ")];
-                spans.extend(upstream::token_spans(
+                spans.extend(pane_token_spans(
                     &pane_row.tokens,
                     Style::default().fg(upstream::status_color(pane_row.status, palette)),
                     text_style,
