@@ -37,12 +37,58 @@ pub(super) fn mouse_capture(config: &ClientShellConfig) -> bool {
     config.mouse_capture
 }
 
-pub(super) fn status_icon(status: AgentStatus, config: &ClientShellConfig) -> &'static str {
-    super::super::status_icon(status, config.status_indicators)
+/// Unified status glyphs: every state has its own shape (working spins,
+/// blocked is a diamond, done a check, idle a dotted ring, unknown a middle dot).
+/// Classic layout keeps its own dots/symbols mapping untouched; this
+/// override only drives unified pane rows through the call below.
+///
+/// The working glyph animates through braille frames driven by the render
+/// clock. The client loop already wakes roughly every 100ms, so the
+/// spinner advances without extra timer plumbing.
+pub(super) fn status_icon(status: AgentStatus, _config: &ClientShellConfig) -> &'static str {
+    match status {
+        AgentStatus::Working => working_spinner_frame(std::time::Instant::now()),
+        AgentStatus::Blocked => "◆",
+        AgentStatus::Done => "✓",
+        AgentStatus::Idle => "◌",
+        AgentStatus::Unknown => "·",
+    }
 }
 
+/// Braille spinner frames for the working glyph, sampled in order. Busy and
+/// unmistakable at a glance; the tradeoff is vertical metrics: braille cells
+/// render full-height next to the centered idle ring, so state switches can
+/// visibly shift the glyph by a pixel or two.
+const WORKING_SPINNER_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+/// One frame per client tick keeps the cadence even: the loop wakes roughly
+/// every 100ms, so each repaint advances exactly one frame for a 1.0s cycle.
+/// An off-multiple interval (e.g. 120ms) aliases into stalls and skips.
+const SPINNER_FRAME_MS: u128 = 100;
+
+fn spinner_epoch() -> std::time::Instant {
+    static EPOCH: OnceLock<std::time::Instant> = OnceLock::new();
+    *EPOCH.get_or_init(std::time::Instant::now)
+}
+
+fn working_spinner_frame(now: std::time::Instant) -> &'static str {
+    let elapsed = now.saturating_duration_since(spinner_epoch());
+    WORKING_SPINNER_FRAMES
+        [(elapsed.as_millis() / SPINNER_FRAME_MS) as usize % WORKING_SPINNER_FRAMES.len()]
+}
+
+/// Unified status colors: peach working, red blocked, green done, grey idle
+/// and unknown. Classic layout keeps its own mapping untouched; this
+/// override only drives unified pane rows through the calls below. Done
+/// takes green by the usual success convention while idle drops to tertiary,
+/// so the resting default never outshines active work.
 pub(super) fn status_color(status: AgentStatus, palette: &Palette) -> ratatui::style::Color {
-    super::super::status_color(status, palette)
+    match status {
+        AgentStatus::Working => palette.peach,
+        AgentStatus::Blocked => palette.red,
+        AgentStatus::Done => palette.green,
+        AgentStatus::Idle | AgentStatus::Unknown => palette.overlay0,
+    }
 }
 
 /// Unified layout replaces the stock agent layout with a two-line pane row:
@@ -468,4 +514,43 @@ pub(super) fn machine_layout<'a>(state: &ShellRenderState<'a>) -> MachineLayout<
         });
     }
     MachineLayout { machines, rows }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config() -> ClientShellConfig {
+        ClientShellConfig::from_config(&crate::config::Config::default())
+    }
+
+    #[test]
+    fn settled_statuses_have_distinct_static_glyphs() {
+        let config = config();
+        assert_eq!(status_icon(AgentStatus::Blocked, &config), "\u{25c6}");
+        assert_eq!(status_icon(AgentStatus::Done, &config), "\u{2713}");
+        assert_eq!(status_icon(AgentStatus::Idle, &config), "\u{25cc}");
+        assert_eq!(status_icon(AgentStatus::Unknown, &config), "\u{b7}");
+    }
+
+    #[test]
+    fn working_glyph_spins_through_braille_frames() {
+        let config = config();
+        assert!(WORKING_SPINNER_FRAMES.contains(&status_icon(AgentStatus::Working, &config)));
+        let start = spinner_epoch();
+        assert_eq!(working_spinner_frame(start), WORKING_SPINNER_FRAMES[0]);
+        assert_eq!(
+            working_spinner_frame(
+                start + std::time::Duration::from_millis(SPINNER_FRAME_MS as u64)
+            ),
+            WORKING_SPINNER_FRAMES[1]
+        );
+        let cycle = std::time::Duration::from_millis(
+            (SPINNER_FRAME_MS as u64) * (WORKING_SPINNER_FRAMES.len() as u64),
+        );
+        assert_eq!(
+            working_spinner_frame(start + cycle),
+            WORKING_SPINNER_FRAMES[0]
+        );
+    }
 }
