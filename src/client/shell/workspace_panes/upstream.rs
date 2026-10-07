@@ -19,6 +19,8 @@ pub(super) use crate::protocol::{ClientShellSnapshot, ClientShellWorkspace};
 
 pub(super) type Token = crate::ui::ResolvedToken;
 
+pub(super) use crate::ui::ResolvedTokenKind;
+
 pub(super) fn unified_layout(config: &ClientShellConfig) -> bool {
     config.sidebar_layout == crate::config::SidebarLayout::Unified
 }
