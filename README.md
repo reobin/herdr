@@ -1,3 +1,9 @@
+> **fork note:** this is [`reobin/herdr`](https://github.com/reobin/herdr), a fork of [`herdrdev/herdr`](https://github.com/herdrdev/herdr) that tracks upstream and adds only the unified sidebar (`ui.sidebar.layout = "unified"`). See [sidebar-unified docs](docs/next/website/src/content/docs/sidebar-unified.mdx) for details.
+>
+> `herdr update` installs upstream binaries and reverts the sidebar. To keep the fork layout, build from source: `cargo build --release --locked`.
+
+![unified sidebar layout](assets/screenshot-unified.png)
+
 # herdr
 
 
@@ -72,7 +78,7 @@ if you are an ai agent helping with this repository, read [`AGENTS.md`](./AGENTS
 ## development
 
 ```bash
-git clone https://github.com/herdrdev/herdr
+git clone https://github.com/reobin/herdr
 cd herdr
 cargo build --release
 
