@@ -170,6 +170,7 @@ pub(super) fn snapshot_with_completions(
                 terminal_title_stripped: agent.terminal_title_stripped,
                 agent_status: agent.agent_status,
                 state_change_seq: agent.state_change_seq,
+                status_since_ms: agent.status_since_ms,
                 state_labels,
                 tokens,
                 focused,
@@ -656,6 +657,7 @@ mod tests {
                 terminal.agent_name = Some(format!("agent-{index}"));
                 terminal.last_agent_state_change_seq = Some(5);
                 terminal.last_agent_completion_seq = Some(7);
+                terminal.last_agent_status_since_ms = Some(725_000);
             }
             let runtime = crate::terminal::TerminalRuntime::test_with_scrollback_bytes(
                 20,
@@ -707,6 +709,7 @@ mod tests {
             assert_eq!(agent.name, public_agent.name);
             assert_eq!(agent.agent_status, public_agent.agent_status);
             assert_eq!(agent.state_change_seq, 5);
+            assert_eq!(agent.status_since_ms, Some(725_000));
         }
         assert_eq!(completions.revision, 9);
         assert_eq!(completions.completions.len(), 2);

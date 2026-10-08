@@ -1754,11 +1754,21 @@ impl AppState {
             || (change.state == AgentState::Idle && suppress_acquisition_completion);
         if change.previous_state != change.state {
             self.next_agent_state_change_seq += 1;
+            // One stamp covers every status: elapsed rows read time in the
+            // current status, whatever it is. A failed clock keeps the
+            // previous stamp instead of poisoning the row with the epoch.
+            let status_since_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_millis() as u64)
+                .ok();
             if let Some(terminal) = self.terminals.get_mut(&terminal_id) {
                 terminal.last_agent_state_change_seq = Some(self.next_agent_state_change_seq);
                 terminal.last_agent_completion_seq = (!suppress_completion
                     && is_completion_transition(&change))
                 .then_some(self.next_agent_state_change_seq);
+                if let Some(since) = status_since_ms {
+                    terminal.last_agent_status_since_ms = Some(since);
+                }
             }
         }
         let seen = self.apply_pane_state_change(ws_idx, pane_id, &change, suppress_completion)?;
@@ -3168,6 +3178,49 @@ mod tests {
     #[test]
     fn completion_guard_unknown_to_idle_is_not_completed_work() {
         assert_completion_guard_sequence(false, &[AgentState::Unknown, AgentState::Idle], false);
+    }
+
+    #[test]
+    fn every_status_transition_restamps_status_since() {
+        let mut state = app_with_workspaces(&["active"]);
+        let pane_id = *state.workspaces[0].panes.keys().next().unwrap();
+        let terminal_id = state.workspaces[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let state_changed = |state: AgentState| AppEvent::StateChanged {
+            pane_id,
+            agent: Some(Agent::Pi),
+            state,
+            visible_blocker: state == AgentState::Blocked,
+            visible_working: state == AgentState::Working,
+            process_exited: false,
+            observed_at: std::time::Instant::now(),
+        };
+        assert_eq!(
+            state.terminals[&terminal_id].last_agent_status_since_ms,
+            None
+        );
+        for status in [
+            AgentState::Working,
+            AgentState::Idle,
+            AgentState::Blocked,
+            AgentState::Unknown,
+        ] {
+            state.handle_app_event(state_changed(status));
+            let since = state.terminals[&terminal_id]
+                .last_agent_status_since_ms
+                .expect("every transition stamps since");
+            assert!(since > 0, "stamps wall-clock millis");
+        }
+        let settled = state.terminals[&terminal_id]
+            .last_agent_status_since_ms
+            .expect("settled statuses keep a stamp");
+        state.handle_app_event(state_changed(AgentState::Unknown));
+        assert_eq!(
+            state.terminals[&terminal_id].last_agent_status_since_ms,
+            Some(settled),
+            "repeat reports keep the original start"
+        );
     }
 
     #[test]

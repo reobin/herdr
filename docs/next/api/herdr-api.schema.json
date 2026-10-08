@@ -6626,6 +6626,14 @@
               },
               "type": "object"
             },
+            "status_since_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "tab_id": {
               "type": "string"
             },
