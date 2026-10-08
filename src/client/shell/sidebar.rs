@@ -217,7 +217,12 @@ pub(crate) fn render_sidebar(
         crate::ui::expanded_sidebar_sections(area, state.sidebar_section_split);
     hits.sidebar_section_divider =
         crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split);
-    let panes = workspace_panes::SidebarPanes::local(snapshot, config, state.active_endpoint_id);
+    let panes = workspace_panes::SidebarPanes::local(
+        snapshot,
+        config,
+        state.active_endpoint_id,
+        state.collapsed_groups,
+    );
     let (workspace_area, detail_area) = panes.areas(area, workspace_area, detail_area, hits);
     put_text(
         buffer,
