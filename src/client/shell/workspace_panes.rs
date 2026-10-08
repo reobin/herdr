@@ -26,19 +26,38 @@ use upstream::{
 /// other block is separated by one row.
 pub(super) const WORKSPACE_ROW_GAP: u16 = 1;
 
-/// Heartbeat for the working spinner. Timer ticks only recompose when a tick
-/// requests a repaint, so an idle shell would freeze the animation between
-/// unrelated activity. The client Timer arm ORs this into its repaint
-/// decision; true while unified layout has a working agent to animate.
-pub(crate) fn spinner_needs_repaint(shell: &ClientShellState) -> bool {
+/// Label cells kept before the elapsed slot shows. Below this the first row
+/// keeps its full width and the elapsed time gives up.
+const MIN_ELAPSED_LABEL_WIDTH: u16 = 5;
+
+/// Heartbeat for the working spinner and status elapsed times. Timer ticks
+/// only recompose when a tick requests a repaint, so an idle shell would
+/// freeze the animation between unrelated activity. The client Timer arm
+/// ORs this into its repaint decision; true while unified layout has a
+/// working agent to animate, a fresh stamp ticking through seconds, or a
+/// settled stamp within a second past its minute flip. Settled rows
+/// between flips correctly stay quiet; the next flip wakes them.
+pub(crate) fn unified_sidebar_needs_repaint(shell: &ClientShellState) -> bool {
     if !upstream::unified_layout(&shell.config) {
         return false;
     }
     shell.snapshot.as_ref().is_some_and(|snapshot| {
-        snapshot
+        if snapshot
             .agents
             .iter()
             .any(|agent| agent.agent_status == AgentStatus::Working)
+        {
+            return true;
+        }
+        let now = now_ms();
+        snapshot
+            .agents
+            .iter()
+            .filter_map(|agent| agent.status_since_ms)
+            .any(|since| {
+                let age = now.saturating_sub(since);
+                age < 60_000 || age % 60_000 < 1_000
+            })
     })
 }
 
@@ -47,6 +66,10 @@ pub(super) struct WorkspacePaneRow<'a> {
     pub(super) status: AgentStatus,
     pub(super) kind: &'a str,
     pub(super) label: Option<&'a str>,
+    /// Wall-clock millis the agent entered its current status, restamped on
+    /// every transition. `None` for shell rows and older endpoints that
+    /// never reported it.
+    pub(super) status_since_ms: Option<u64>,
     /// Agent text flattened to one line. Empty for shell panes and for
     /// layouts that resolve to nothing, which fall back to `kind / label`.
     pub(super) tokens: Vec<Token>,
@@ -179,6 +202,7 @@ fn pane_row<'a>(
             status: AgentStatus::Unknown,
             kind: "shell",
             label: pane_label,
+            status_since_ms: None,
             tokens: Vec::new(),
             detail: None,
             focused: pane.focused,
@@ -191,10 +215,33 @@ fn pane_row<'a>(
         status: agent.status,
         kind: agent.kind.unwrap_or("shell"),
         label,
+        status_since_ms: agent.status_since_ms,
         tokens: text.line,
         detail: text.detail,
         focused: pane.focused,
     }
+}
+
+/// Short status elapsed for the right edge of agent first rows: `7s` under
+/// a minute, then `3m`, `12m`, `1h05m`. The sub-minute seconds keep fresh
+/// rows lively; the repaint heartbeat below wakes the client every tick, so
+/// the seconds text tracks it for free.
+fn format_elapsed(status_since_ms: u64, now_ms: u64) -> String {
+    let secs = now_ms.saturating_sub(status_since_ms) / 1_000;
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3_600 {
+        format!("{}m", secs / 60)
+    } else {
+        format!("{}h{:02}m", secs / 3_600, secs % 3_600 / 60)
+    }
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// Workspace header rows: the repo name (plus ` / label` when renamed),
@@ -883,6 +930,7 @@ fn render_pane_rows(
     };
     let record_hits = upstream::mouse_capture(config);
     let right = rect.right().saturating_sub(2);
+    let now = now_ms();
     // Tabs align with the workspace header; panes indent two spaces under
     // their tab with a quiet spine hanging below the tab name across the
     // full height of the tab's pane rows. A lone tab skips its header so
@@ -968,6 +1016,19 @@ fn render_pane_rows(
                     Style::default().fg(upstream::status_color(pane_row.status, palette)),
                 )
             };
+            // Agents hang their status elapsed off the right edge of the
+            // first row only. The label truncates first; the slot gives up
+            // entirely when the row cannot spare it.
+            let first_width = right.saturating_sub(x);
+            let elapsed = pane_row
+                .status_since_ms
+                .map(|since| format_elapsed(since, now));
+            let (label_end, elapsed) = match elapsed {
+                Some(text) if first_width > text.len() as u16 + MIN_ELAPSED_LABEL_WIDTH => {
+                    (right.saturating_sub(text.len() as u16 + 1), Some(text))
+                }
+                _ => (right, None),
+            };
             if pane_row.tokens.is_empty() {
                 // A shell row's label is its callsign, so the kind prefix
                 // would only repeat what the `$` marker says. Agent
@@ -977,9 +1038,9 @@ fn render_pane_rows(
                     (Some(label), kind) => format!(" {kind} / {label}"),
                     (None, kind) => format!(" {kind}"),
                 };
-                put_text(buffer, x, y, right.saturating_sub(x), &text, text_style);
+                put_text(buffer, x, y, label_end.saturating_sub(x), &text, text_style);
             } else {
-                let width = right.saturating_sub(x);
+                let width = label_end.saturating_sub(x);
                 let mut spans = vec![Span::raw(" ")];
                 spans.extend(pane_token_spans(
                     &pane_row.tokens,
@@ -991,6 +1052,18 @@ fn render_pane_rows(
                     usize::from(width.saturating_sub(1)),
                 ));
                 Paragraph::new(Line::from(spans)).render(Rect::new(x, y, width, 1), buffer);
+            }
+            if let Some(text) = elapsed {
+                // Quiet tertiary like the branch line: the elapsed time
+                // informs without outshining the row title.
+                put_text(
+                    buffer,
+                    right.saturating_sub(text.len() as u16),
+                    y,
+                    text.len() as u16,
+                    &text,
+                    Style::default().fg(palette.overlay0),
+                );
             }
             if record_hits {
                 upstream::push_pane_hit(
@@ -1040,5 +1113,23 @@ fn render_pane_rows(
                 y = y.saturating_add(1);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_elapsed;
+
+    #[test]
+    fn elapsed_formats_seconds_minutes_and_hours() {
+        assert_eq!(format_elapsed(0, 0), "0s");
+        assert_eq!(format_elapsed(0, 7_000), "7s");
+        assert_eq!(format_elapsed(0, 59_999), "59s");
+        assert_eq!(format_elapsed(0, 60_000), "1m");
+        assert_eq!(format_elapsed(0, 3 * 60_000), "3m");
+        assert_eq!(format_elapsed(0, 59 * 60_000 + 59_999), "59m");
+        assert_eq!(format_elapsed(0, 60 * 60_000), "1h00m");
+        assert_eq!(format_elapsed(0, 83 * 60_000), "1h23m");
+        assert_eq!(format_elapsed(5_000, 3_000), "0s");
     }
 }

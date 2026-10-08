@@ -1103,6 +1103,8 @@ pub struct ClientShellAgent {
     #[serde(deserialize_with = "deserialize_client_shell_agent_status")]
     pub agent_status: crate::api::schema::AgentStatus,
     pub state_change_seq: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_since_ms: Option<u64>,
     pub state_labels: Vec<(String, String)>,
     pub tokens: Vec<(String, String)>,
     pub focused: bool,

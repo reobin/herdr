@@ -3,7 +3,8 @@ use crate::client::endpoint::{
     ClientEndpointId, ClientEndpointStatus, ProfileId, SavedSshEndpoint,
 };
 use crate::client::shell::workspace_panes::{
-    header_rows, spinner_needs_repaint, WorkspacePaneRow, WorkspacePaneSection, WorkspacePanes,
+    header_rows, unified_sidebar_needs_repaint, WorkspacePaneRow, WorkspacePaneSection,
+    WorkspacePanes,
 };
 use crate::config::{AgentSidebarToken, AgentsSidebarConfig, SidebarLayout};
 use crate::ui::ResolvedTokenKind;
@@ -87,6 +88,7 @@ fn agent(pane_id: &str) -> ClientShellAgent {
         terminal_title_stripped: None,
         agent_status: AgentStatus::Working,
         state_change_seq: 1,
+        status_since_ms: None,
         state_labels: Vec::new(),
         tokens: Vec::new(),
         focused: false,
@@ -551,10 +553,45 @@ fn idle_timer_tick_requests_repaint_while_a_spinner_is_visible() {
         | state.tick_copy_feedback(now)
         | state.tick_workspace_highlight(now)
         | state.tick_endpoint_error(now)
-        | spinner_needs_repaint(&state);
+        | unified_sidebar_needs_repaint(&state);
     assert!(
         outcome.repaint,
         "idle tick must repaint while a spinner is visible"
+    );
+}
+
+#[test]
+fn idle_timer_tick_requests_repaint_while_status_elapsed_ticks() {
+    // Fresh stamps tick every second; settled stamps only need their
+    // minute flip. A mid-minute settled row correctly stays quiet.
+    let mut fresh = snapshot();
+    let mut pi = elapsed_agent("pane_1", 30_000);
+    pi.agent_status = AgentStatus::Idle;
+    fresh.agents.push(pi);
+    assert!(
+        unified_sidebar_needs_repaint(&panes_state(&panes_config(), fresh)),
+        "fresh elapsed must repaint"
+    );
+
+    let mut flip = snapshot();
+    let mut pi = elapsed_agent("pane_1", 12 * 60_000);
+    pi.agent_status = AgentStatus::Idle;
+    flip.agents.push(pi);
+    assert!(
+        unified_sidebar_needs_repaint(&panes_state(&panes_config(), flip)),
+        "minute flip must repaint"
+    );
+}
+
+#[test]
+fn idle_timer_tick_stays_quiet_between_minute_flips() {
+    let mut snapshot = snapshot();
+    let mut pi = elapsed_agent("pane_1", 12 * 60_000 + 30_000);
+    pi.agent_status = AgentStatus::Idle;
+    snapshot.agents.push(pi);
+    assert!(
+        !unified_sidebar_needs_repaint(&panes_state(&panes_config(), snapshot)),
+        "mid-minute settled rows need no repaint"
     );
 }
 
@@ -1275,4 +1312,62 @@ fn sidebar_layout_render_scale_profile() {
             );
         }
     }
+}
+
+fn elapsed_agent(pane_id: &str, age_ms: u64) -> ClientShellAgent {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as u64)
+        .unwrap_or(0);
+    let mut pi = agent(pane_id);
+    pi.status_since_ms = Some(now.saturating_sub(age_ms));
+    pi
+}
+
+#[test]
+fn working_row_right_aligns_elapsed_on_first_row_only() {
+    let mut snapshot = snapshot();
+    snapshot
+        .agents
+        .push(elapsed_agent("pane_1", 12 * 60_000 + 30_000));
+    let mut state = panes_state(&panes_config(), snapshot);
+    let frame = state.compose(100, 16).expect("panes sidebar");
+    let rows = sidebar_rows(&frame);
+    let (rect, _, _) = state.hits.workspace_panes[0];
+    let first = &rows[rect.y as usize];
+    assert!(
+        first.starts_with(" │ ⠋ herdr / pi"),
+        "label keeps its full text: {first:?}"
+    );
+    assert!(first.ends_with("12m"), "elapsed right aligned: {first:?}");
+    assert_eq!(
+        rows.iter().filter(|row| row.contains("12m")).count(),
+        1,
+        "detail row carries no elapsed"
+    );
+}
+
+#[test]
+fn settled_row_shows_time_in_status_while_shell_rows_show_none() {
+    let mut snapshot = snapshot();
+    let mut pi = elapsed_agent("pane_1", 12 * 60_000 + 30_000);
+    pi.agent_status = AgentStatus::Idle;
+    snapshot.agents.push(pi);
+    snapshot.panes.push(shell_pane("pane_2", "ws_1"));
+    let mut state = panes_state(&panes_config(), snapshot);
+    let frame = state.compose(100, 16).expect("panes sidebar");
+    let rows = sidebar_rows(&frame);
+    assert_eq!(
+        rows.iter().filter(|row| row.contains("12m")).count(),
+        1,
+        "settled agent row keeps its elapsed: {rows:?}"
+    );
+    let idle = rows
+        .iter()
+        .find(|row| row.contains("12m"))
+        .expect("idle elapsed row");
+    assert!(
+        idle.ends_with("12m"),
+        "settled elapsed right aligned: {idle:?}"
+    );
 }

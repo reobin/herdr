@@ -2281,7 +2281,9 @@ async fn run_client_loop(
                             | shell.tick_copy_feedback(now)
                             | shell.tick_workspace_highlight(now)
                             | shell.tick_endpoint_error(now)
-                            | crate::client::shell::workspace_panes::spinner_needs_repaint(shell);
+                            | crate::client::shell::workspace_panes::unified_sidebar_needs_repaint(
+                                shell,
+                            );
                         let frame = outcome
                             .repaint
                             .then(|| shell.compose(state.reported_size.0, state.reported_size.1))

@@ -173,6 +173,7 @@ pub(super) struct AgentFacts<'a> {
     pub(super) status: AgentStatus,
     pub(super) kind: Option<&'a str>,
     pub(super) title: Option<&'a str>,
+    pub(super) status_since_ms: Option<u64>,
     agent: &'a crate::protocol::ClientShellAgent,
 }
 
@@ -180,6 +181,7 @@ pub(super) fn agents(snapshot: &ClientShellSnapshot) -> impl Iterator<Item = Age
     snapshot.agents.iter().map(|agent| AgentFacts {
         pane_id: &agent.pane_id,
         status: agent.agent_status,
+        status_since_ms: agent.status_since_ms,
         kind: agent
             .display_agent
             .as_deref()

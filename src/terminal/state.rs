@@ -155,6 +155,7 @@ pub struct TerminalState {
     pub state: AgentState,
     pub last_agent_state_change_seq: Option<u64>,
     pub last_agent_completion_seq: Option<u64>,
+    pub last_agent_status_since_ms: Option<u64>,
     pub revision: u64,
     pub launch_argv: Option<Vec<String>>,
     pub respawn_shell_on_exit: bool,
@@ -195,6 +196,7 @@ impl TerminalState {
             state: AgentState::Unknown,
             last_agent_state_change_seq: None,
             last_agent_completion_seq: None,
+            last_agent_status_since_ms: None,
             revision: 0,
             launch_argv: None,
             respawn_shell_on_exit: false,
@@ -252,6 +254,12 @@ impl TerminalState {
         self.state = snapshot.authority.state;
         self.hook_authority = Some(snapshot.authority);
         self.agent_process_acquisition_pending = snapshot.acquisition_pending;
+        // Restored rows never see a transition, so without a stamp they
+        // would show no time until the next one. Backfill with restore
+        // time: "time since restore" self-corrects on the next change.
+        if let Ok(since) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+            self.last_agent_status_since_ms = Some(since.as_millis() as u64);
+        }
     }
 
     pub(crate) fn finish_agent_process_acquisition(&mut self) -> bool {
@@ -2357,6 +2365,7 @@ impl TerminalState {
         self.state = AgentState::Unknown;
         self.last_agent_state_change_seq = None;
         self.last_agent_completion_seq = None;
+        self.last_agent_status_since_ms = None;
         self.launch_argv = None;
         self.respawn_shell_on_exit = false;
         self.recent_agent_process_exit = None;
