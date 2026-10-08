@@ -5,7 +5,7 @@
 
 mod upstream;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use ratatui::{
     buffer::Buffer,
@@ -334,6 +334,10 @@ pub(super) fn handle_click(
     point: (u16, u16),
     outcome: &mut ClientShellInput,
 ) -> bool {
+    if let Some((endpoint_id, workspace_id)) = upstream::collapse_toggle_at(shell, point) {
+        upstream::toggle_workspace_collapsed(shell, &endpoint_id, &workspace_id, outcome);
+        return true;
+    }
     let Some((endpoint_id, pane_id)) = upstream::pane_hit_at(shell, point) else {
         return false;
     };
@@ -341,10 +345,37 @@ pub(super) fn handle_click(
     true
 }
 
+pub(super) fn handle_prefix_key(
+    shell: &mut ClientShellState,
+    key: &crate::input::TerminalKey,
+    outcome: &mut ClientShellInput,
+) -> bool {
+    upstream::handle_prefix_key(shell, key, outcome)
+}
+
+#[cfg(test)]
+pub(super) fn workspace_collapse_key(workspace_id: &str) -> String {
+    upstream::workspace_collapse_key(workspace_id)
+}
+
+/// Parking signal: blocked outranks working outranks done, and anything
+/// settled outranks idle/shell rows. The header count takes the worst
+/// color so a parked workspace still reports its hottest pane.
+fn status_severity(status: AgentStatus) -> u8 {
+    match status {
+        AgentStatus::Blocked => 4,
+        AgentStatus::Working => 3,
+        AgentStatus::Done => 2,
+        AgentStatus::Idle => 1,
+        AgentStatus::Unknown => 0,
+    }
+}
+
 struct Machine<'a> {
     id: &'a ClientEndpointId,
     snapshot: Option<&'a ClientShellSnapshot>,
     panes: Option<WorkspacePanes<'a>>,
+    collapsed: Option<&'a HashSet<String>>,
 }
 
 struct Active<'a> {
@@ -362,10 +393,11 @@ pub(super) struct SidebarPanes<'a> {
 }
 
 impl<'a> SidebarPanes<'a> {
-    pub(super) fn local(
+    pub(super) fn local<'s: 'a>(
         snapshot: &'a ClientShellSnapshot,
         config: &'a ClientShellConfig,
         active_id: &'a ClientEndpointId,
+        collapsed: &'s HashSet<String>,
     ) -> Self {
         if !upstream::unified_layout(config) {
             return Self { active: None };
@@ -377,6 +409,7 @@ impl<'a> SidebarPanes<'a> {
                 snapshot,
                 upstream::agents_config(config),
             )),
+            collapsed: Some(collapsed),
         };
         Self {
             active: Some(Active {
@@ -406,6 +439,7 @@ impl<'a> SidebarPanes<'a> {
                 panes: machine
                     .snapshot
                     .map(|snapshot| WorkspacePanes::new(snapshot, agents_config)),
+                collapsed: machine.collapsed,
             })
             .collect();
         Self {
@@ -638,14 +672,44 @@ impl<'a> Active<'a> {
             .map_or(1, |workspace| self.block_height(machine, workspace, entry))
     }
 
+    fn collapsed_set(&self, machine: usize) -> Option<&HashSet<String>> {
+        self.machines
+            .get(machine)
+            .and_then(|machine| machine.collapsed)
+    }
+
+    fn parked(&self, machine: usize, workspace_id: &str) -> bool {
+        upstream::workspace_collapsed(self.collapsed_set(machine), workspace_id)
+    }
+
+    /// Pane count and hottest status for the header count. Sections
+    /// already hold one row per pane, so this needs no second walk over
+    /// the snapshot.
+    fn pane_summary(&self, machine: usize, workspace_id: &str) -> (usize, AgentStatus) {
+        let mut count = 0;
+        let mut worst = AgentStatus::Unknown;
+        for section in self.sections(machine, workspace_id) {
+            for row in &section.rows {
+                count += 1;
+                if status_severity(row.status) > status_severity(worst) {
+                    worst = row.status;
+                }
+            }
+        }
+        (count, worst)
+    }
+
     fn block_height(
         &self,
         machine: usize,
         workspace: &ClientShellWorkspace,
         entry: &WorkspaceEntry,
     ) -> u16 {
-        let header = header_rows(workspace, upstream::entry(entry).indented).len();
         let workspace_id = upstream::workspace(workspace).workspace_id;
+        if self.parked(machine, workspace_id) {
+            return 1;
+        }
+        let header = header_rows(workspace, upstream::entry(entry).indented).len();
         let panes = self
             .machines
             .get(machine)
@@ -669,6 +733,37 @@ impl<'a> Active<'a> {
         let rows = header_rows(block.workspace, entry.indented);
         let palette = upstream::palette(self.config);
         let sections = self.sections(block.machine, facts.workspace_id);
+        // The count carries the hottest pane status: tertiary while the
+        // workspace rests, signal-colored while anything needs attention.
+        // Bold follows the same emphasis as the name.
+        let (pane_count, worst) = self.pane_summary(block.machine, facts.workspace_id);
+        let emphasized = (show_focus && facts.focused) || selected || dragged;
+        let count = upstream::collapse_count_text(pane_count);
+        let count_style = Style::default()
+            .fg(upstream::status_color(worst, palette))
+            .add_modifier(if emphasized {
+                Modifier::BOLD
+            } else {
+                Modifier::empty()
+            });
+        let count = Some((count.as_str(), count_style));
+        if self.parked(block.machine, facts.workspace_id) {
+            // One row only: the name plus the count. Branch, tabs, and
+            // panes all give up their rows; the count keeps the pane
+            // total visible and stays clickable to unpark.
+            render_header(
+                buffer,
+                rect,
+                &entry,
+                &rows[..rows.len().min(1)],
+                show_focus && facts.focused,
+                selected,
+                dragged,
+                palette,
+                count,
+            );
+            return;
+        }
         render_header(
             buffer,
             rect,
@@ -678,6 +773,7 @@ impl<'a> Active<'a> {
             selected,
             dragged,
             palette,
+            count,
         );
         let Some(endpoint_id) = self.machines.get(block.machine).map(|machine| machine.id) else {
             return;
@@ -822,6 +918,7 @@ fn render_header(
     selected: bool,
     dragged: bool,
     palette: &Palette,
+    count: Option<(&str, Style)>,
 ) {
     // The name stays primary in every state; weight alone marks focus and
     // the navigate cursor. The branch line stays tertiary in every state.
@@ -834,6 +931,10 @@ fn render_header(
             Modifier::empty()
         });
     let secondary_style = Style::default().fg(palette.overlay0);
+    // The count hugs the right edge of the first row, ending two cells
+    // before the block edge; the name truncates around it. Same geometry
+    // as `collapse_toggle_rect`, which hit-tests the count.
+    let count_width = count.map_or(0, |(text, _)| slash_header_width(text));
     for (row_index, row) in rows.iter().enumerate() {
         let y = area.y.saturating_add(row_index as u16);
         if y >= area.bottom() {
@@ -841,6 +942,11 @@ fn render_header(
         }
         let x = area.x.saturating_add(if entry.indented { 7 } else { 1 });
         let width = area.right().saturating_sub(2).saturating_sub(x);
+        let width = if row_index == 0 && count_width > 0 {
+            width.saturating_sub(count_width as u16 + 1)
+        } else {
+            width
+        };
         if row_index == 0 && is_slash_header(row) {
             render_slash_header(
                 buffer,
@@ -851,18 +957,25 @@ fn render_header(
                 workspace_style,
                 secondary_style,
             );
-            continue;
+        } else {
+            let spans = upstream::token_spans(
+                row,
+                Style::default(),
+                workspace_style,
+                secondary_style,
+                Style::default().fg(palette.overlay1),
+                palette,
+                usize::from(width),
+            );
+            Paragraph::new(Line::from(spans)).render(Rect::new(x, y, width, 1), buffer);
         }
-        let spans = upstream::token_spans(
-            row,
-            Style::default(),
-            workspace_style,
-            secondary_style,
-            Style::default().fg(palette.overlay1),
-            palette,
-            usize::from(width),
-        );
-        Paragraph::new(Line::from(spans)).render(Rect::new(x, y, width, 1), buffer);
+        if row_index == 0 {
+            if let Some((text, style)) = count {
+                let full = area.right().saturating_sub(2).saturating_sub(x);
+                let start = x.saturating_add(full.saturating_sub(count_width as u16));
+                put_text(buffer, start, y, count_width as u16, text, style);
+            }
+        }
     }
 }
 

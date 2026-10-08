@@ -476,9 +476,137 @@ pub(super) fn endpoint_id(endpoint: &ClientShellEndpoint) -> &ClientEndpointId {
     &endpoint.endpoint_id
 }
 
+/// Parked-workspace keys live in the stock `collapsed_groups` sets under a
+/// `unified/ws:` prefix, so they persist through the existing chrome
+/// preferences without new state. Worktree group keys never carry the
+/// prefix, so the two never collide.
+pub(super) const WORKSPACE_COLLAPSE_PREFIX: &str = "unified/ws:";
+
+pub(super) fn workspace_collapse_key(workspace_id: &str) -> String {
+    format!("{WORKSPACE_COLLAPSE_PREFIX}{workspace_id}")
+}
+
+pub(super) fn workspace_collapsed(collapsed: Option<&HashSet<String>>, workspace_id: &str) -> bool {
+    collapsed.is_some_and(|sets| sets.contains(&workspace_collapse_key(workspace_id)))
+}
+
+/// Parked workspaces show `≡n` for their pane count; the same text is the
+/// collapse toggle in every header. No arrows: one row versus many makes
+/// the state obvious, and the symbol keeps the row narrow.
+pub(super) fn collapse_count_text(pane_count: usize) -> String {
+    format!("≡{pane_count}")
+}
+
+pub(super) fn collapse_count_width(text: &str) -> usize {
+    use unicode_width::UnicodeWidthStr;
+    UnicodeWidthStr::width(text)
+}
+
+/// Toggle cell for a rendered workspace block: the count hugs the right
+/// edge of the first row, ending two cells before the block edge so the
+/// last cell stays free for the worktree group toggle. Both sidebar paths
+/// share the block's right edge even though the machine path indents its
+/// content, so the outer hit rect suffices.
+pub(super) fn collapse_toggle_rect(outer: Rect, text_width: usize) -> Rect {
+    let end = outer.right().saturating_sub(2);
+    let x = end.saturating_sub(text_width as u16);
+    Rect::new(x, outer.y, end.saturating_sub(x), 1)
+}
+
+fn endpoint_snapshot<'s>(
+    shell: &'s ClientShellState,
+    endpoint_id: &ClientEndpointId,
+) -> Option<&'s ClientShellSnapshot> {
+    if endpoint_id.is_local() {
+        shell.snapshot.as_deref()
+    } else {
+        shell
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.endpoint_id == *endpoint_id)?
+            .snapshot
+            .as_deref()
+    }
+}
+
+pub(super) fn workspace_pane_count(
+    shell: &ClientShellState,
+    endpoint_id: &ClientEndpointId,
+    workspace_id: &str,
+) -> usize {
+    endpoint_snapshot(shell, endpoint_id).map_or(0, |snapshot| {
+        snapshot
+            .panes
+            .iter()
+            .filter(|pane| pane.workspace_id == workspace_id)
+            .count()
+    })
+}
+
+/// Click on a count toggle: park or unpark that workspace without
+/// stealing focus, like the worktree group toggle. Inert in classic
+/// layout and in the collapsed rail, where headers show no counts.
+pub(super) fn collapse_toggle_at(
+    shell: &ClientShellState,
+    point: (u16, u16),
+) -> Option<(ClientEndpointId, String)> {
+    if !unified_layout(&shell.config) || shell.sidebar_collapsed {
+        return None;
+    }
+    shell.hits.workspaces.iter().find_map(|hit| {
+        if !super::super::contains(hit.rect, point) || point.1 != hit.rect.y {
+            return None;
+        }
+        let count = workspace_pane_count(shell, &hit.endpoint_id, &hit.workspace_id);
+        let toggle =
+            collapse_toggle_rect(hit.rect, collapse_count_width(&collapse_count_text(count)));
+        super::super::contains(toggle, point)
+            .then(|| (hit.endpoint_id.clone(), hit.workspace_id.clone()))
+    })
+}
+
+pub(super) fn toggle_workspace_collapsed(
+    shell: &mut ClientShellState,
+    endpoint_id: &ClientEndpointId,
+    workspace_id: &str,
+    outcome: &mut ClientShellInput,
+) {
+    shell.toggle_collapsed_group(endpoint_id, workspace_collapse_key(workspace_id));
+    shell.persist_chrome_preferences(outcome);
+    outcome.repaint = true;
+}
+
+/// Hardcoded `prefix+m` park toggle for the focused workspace. One key,
+/// no `keys.*` plumbing: a configured `prefix+m` binding still wins
+/// because the input path only reaches here on no match. Inert in
+/// classic layout and in the collapsed rail, like the count click.
+pub(super) fn handle_prefix_key(
+    shell: &mut ClientShellState,
+    key: &crate::input::TerminalKey,
+    outcome: &mut ClientShellInput,
+) -> bool {
+    use crossterm::event::{KeyCode, KeyModifiers};
+    if !crate::config::terminal_key_matches_combo(key, (KeyCode::Char('m'), KeyModifiers::empty()))
+    {
+        return false;
+    }
+    if !unified_layout(&shell.config) || shell.sidebar_collapsed {
+        return false;
+    }
+    let endpoint_id = shell.active_endpoint_id.clone();
+    let Some(workspace_id) = endpoint_snapshot(shell, &endpoint_id)
+        .and_then(|snapshot| snapshot.focused_workspace_id.clone())
+    else {
+        return false;
+    };
+    toggle_workspace_collapsed(shell, &endpoint_id, &workspace_id, outcome);
+    true
+}
+
 pub(super) struct MachineFacts<'a> {
     pub(super) id: &'a ClientEndpointId,
     pub(super) snapshot: Option<&'a ClientShellSnapshot>,
+    pub(super) collapsed: Option<&'a HashSet<String>>,
 }
 
 /// The machine list and its sidebar rows in `endpoint_sidebar::render_expanded`
@@ -497,22 +625,28 @@ pub(super) fn machine_layout<'a>(state: &ShellRenderState<'a>) -> MachineLayout<
         rows.push(None);
         let collapsed = state.collapsed_endpoints.contains(&endpoint.endpoint_id);
         let snapshot = endpoint.snapshot.as_deref().filter(|_| !collapsed);
+        let collapsed_groups: Option<&HashSet<String>> = if endpoint.endpoint_id.is_local() {
+            Some(state.collapsed_groups)
+        } else {
+            state.remote_collapsed_groups.get(&endpoint.endpoint_id)
+        };
         if let Some(snapshot) = snapshot {
-            let collapsed_groups = if endpoint.endpoint_id.is_local() {
-                Some(state.collapsed_groups)
-            } else {
-                state.remote_collapsed_groups.get(&endpoint.endpoint_id)
-            }
-            .unwrap_or(&empty_collapsed_groups);
             rows.extend(
-                super::super::sidebar::workspace_entries(snapshot, collapsed_groups)
-                    .into_iter()
-                    .map(|entry| Some((index, entry))),
+                super::super::sidebar::workspace_entries(
+                    snapshot,
+                    collapsed_groups
+                        .as_ref()
+                        .copied()
+                        .unwrap_or(&empty_collapsed_groups),
+                )
+                .into_iter()
+                .map(|entry| Some((index, entry))),
             );
         }
         machines.push(MachineFacts {
             id: &endpoint.endpoint_id,
             snapshot,
+            collapsed: collapsed_groups,
         });
     }
     MachineLayout { machines, rows }
@@ -524,6 +658,18 @@ mod tests {
 
     fn config() -> ClientShellConfig {
         ClientShellConfig::from_config(&crate::config::Config::default())
+    }
+
+    #[test]
+    fn parked_lookup_only_matches_namespaced_keys() {
+        let sets = HashSet::from(["repo".to_owned(), workspace_collapse_key("ws_1")]);
+        assert!(workspace_collapsed(Some(&sets), "ws_1"));
+        assert!(!workspace_collapsed(Some(&sets), "ws_2"));
+        assert!(!workspace_collapsed(None, "ws_1"));
+        assert!(!workspace_collapsed(
+            Some(&HashSet::from(["ws_1".to_owned()])),
+            "ws_1"
+        ));
     }
 
     #[test]
