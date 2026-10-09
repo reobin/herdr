@@ -576,28 +576,108 @@ pub(super) fn toggle_workspace_collapsed(
     outcome.repaint = true;
 }
 
-/// Hardcoded `prefix+m` park toggle for the focused workspace. One key,
-/// no `keys.*` plumbing: a configured `prefix+m` binding still wins
-/// because the input path only reaches here on no match. Inert in
-/// classic layout and in the collapsed rail, like the count click.
-pub(super) fn handle_prefix_key(
+/// Sentinel `[[keys.command]]` command that toggles the focused workspace's
+/// parked state in unified layout. Any prefix key works, e.g.
+/// `key = "prefix+m"` with `command = "unified:toggle-workspace-park"`.
+/// The entry is consumed client-side before `record_binding`, so it never
+/// reaches the endpoint command lookup; `type`, `width`, and `height` are
+/// ignored, while `description` only feeds the help overlay entry. The key
+/// must use prefix form: a direct key never reaches the intercept and runs
+/// as a normal command. Local keymap only.
+pub(super) const PARK_SENTINEL_COMMAND: &str = "unified:toggle-workspace-park";
+
+/// Key labels of the configured sentinel entries, read from the raw user
+/// keys so they survive snapshot applies. The live `custom_commands` map
+/// holds opaque endpoint command IDs after the first snapshot, never the
+/// sentinel text, so the binding match below goes through these labels
+/// instead. Kept per entry: a multi-key entry only matches a binding
+/// carrying its full set, so a lone real command reusing one of its keys
+/// is never swallowed. Compared normalized (whitespace-free lowercase)
+/// because canonical live labels may differ in case or spacing from the
+/// spelling in the config; spell keys canonical lowercase regardless.
+fn sentinel_label_sets(shell: &ClientShellState) -> Vec<Vec<String>> {
+    shell
+        .config
+        .local_keys
+        .command
+        .iter()
+        .filter(|entry| entry.command.trim() == PARK_SENTINEL_COMMAND)
+        .map(|entry| match &entry.key {
+            crate::config::BindingConfig::One(value) => vec![value.clone()],
+            crate::config::BindingConfig::Many(values) => values.clone(),
+        })
+        .map(|labels| {
+            let mut normalized = labels
+                .iter()
+                .map(|label| normalize_label(label))
+                .filter(|label| !label.is_empty())
+                .collect::<Vec<_>>();
+            normalized.sort();
+            normalized
+        })
+        .filter(|labels| !labels.is_empty())
+        .collect()
+}
+
+fn normalize_label(label: &str) -> String {
+    label
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .collect::<String>()
+        .to_ascii_lowercase()
+}
+
+/// True when the resolved binding is the park sentinel: either it still
+/// carries the sentinel text (no snapshot applied yet) or its full label
+/// set equals a configured sentinel entry's key (post-snapshot opaque ID).
+/// Full-set equality keeps a multi-key sentinel from poisoning an
+/// unrelated command that reuses one of its keys; such collisions already
+/// emit config diagnostics upstream, and the docs keep sentinel keys apart.
+fn is_park_sentinel(
+    shell: &ClientShellState,
+    command: &crate::config::CustomCommandKeybind,
+) -> bool {
+    if command.command.trim() == PARK_SENTINEL_COMMAND {
+        return true;
+    }
+    let mut labels = command
+        .bindings
+        .labels()
+        .iter()
+        .map(|label| normalize_label(label))
+        .collect::<Vec<_>>();
+    labels.sort();
+    !labels.is_empty() && sentinel_label_sets(shell).iter().any(|set| set == &labels)
+}
+
+/// Sentinel binding offered the resolved prefix binding before
+/// `record_binding`. `true` consumes the binding: toggles park when
+/// unified layout is active with a focused workspace, swallows it
+/// otherwise so it never falls through to the endpoint command lookup.
+/// Non-sentinel bindings return `false`. Inert in classic layout and in
+/// the collapsed rail, like the count click.
+pub(super) fn handle_prefix_binding(
     shell: &mut ClientShellState,
-    key: &crate::input::TerminalKey,
+    binding: &crate::input::KeybindMatch,
     outcome: &mut ClientShellInput,
 ) -> bool {
-    use crossterm::event::{KeyCode, KeyModifiers};
-    if !crate::config::terminal_key_matches_combo(key, (KeyCode::Char('m'), KeyModifiers::empty()))
-    {
+    if shell.config.keybinding_source != super::super::ClientShellKeybindingSource::Local {
+        return false;
+    }
+    let crate::input::KeybindMatch::Command(command) = binding else {
+        return false;
+    };
+    if !is_park_sentinel(shell, command) {
         return false;
     }
     if !unified_layout(&shell.config) || shell.sidebar_collapsed {
-        return false;
+        return true;
     }
     let endpoint_id = shell.active_endpoint_id.clone();
     let Some(workspace_id) = endpoint_snapshot(shell, &endpoint_id)
         .and_then(|snapshot| snapshot.focused_workspace_id.clone())
     else {
-        return false;
+        return true;
     };
     toggle_workspace_collapsed(shell, &endpoint_id, &workspace_id, outcome);
     true
