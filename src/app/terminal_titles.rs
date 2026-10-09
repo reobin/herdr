@@ -61,19 +61,38 @@ impl App {
             let Some(terminal) = self.state.terminals.get_mut(&terminal_id) else {
                 continue;
             };
+            let previous_stripped = terminal.terminal_title_stripped();
             let change = terminal.set_terminal_title(title);
             changes.raw_changed |= change.raw_changed;
             changes.stripped_changed |= change.stripped_changed;
             if change.stripped_changed {
-                publish.push((ws_idx, pane_id));
+                publish.push((ws_idx, pane_id, previous_stripped));
             }
         }
 
-        for (ws_idx, pane_id) in publish {
+        for (ws_idx, pane_id, previous_stripped) in publish {
             self.emit_pane_updated(ws_idx, pane_id);
+            self.emit_pane_title_changed(ws_idx, pane_id, previous_stripped);
         }
 
         changes
+    }
+
+    fn emit_pane_title_changed(
+        &mut self,
+        ws_idx: usize,
+        pane_id: PaneId,
+        previous_terminal_title_stripped: Option<String>,
+    ) {
+        if let Some(pane) = self.pane_info(ws_idx, pane_id) {
+            self.emit_event(crate::api::schema::EventEnvelope {
+                event: crate::api::schema::EventKind::PaneTitleChanged,
+                data: crate::api::schema::EventData::PaneTitleChanged {
+                    pane,
+                    previous_terminal_title_stripped,
+                },
+            });
+        }
     }
 }
 
@@ -143,6 +162,10 @@ mod tests {
         assert_eq!(pane.terminal_title_stripped.as_deref(), Some("修复🙂标题"));
         assert_eq!(pane.revision, 1);
         assert_eq!(pane_updated_events(&event_hub), 1);
+        assert_eq!(
+            pane_title_changed_events(&event_hub),
+            vec![(None, Some("修复🙂标题".to_string()))]
+        );
 
         app.terminal_runtimes
             .get(&terminal_id)
@@ -150,6 +173,16 @@ mod tests {
             .test_process_pty_bytes(b"\x1b]0;Done reviewing\x07");
         assert!(app.sync_terminal_titles(&sources).stripped_changed);
         assert_eq!(pane_updated_events(&event_hub), 2);
+        assert_eq!(
+            pane_title_changed_events(&event_hub),
+            vec![
+                (None, Some("修复🙂标题".to_string())),
+                (
+                    Some("修复🙂标题".to_string()),
+                    Some("Done reviewing".to_string())
+                ),
+            ]
+        );
 
         app.terminal_runtimes
             .get(&terminal_id)
@@ -161,6 +194,15 @@ mod tests {
         assert_eq!(pane.terminal_title_stripped, None);
         assert_eq!(pane.revision, 3);
         assert_eq!(pane_updated_events(&event_hub), 3);
+        let title_changes = pane_title_changed_events(&event_hub);
+        assert_eq!(
+            title_changes.len(),
+            3,
+            "title_changed must fire only on stripped change, not raw-only change"
+        );
+        let (previous, current) = title_changes.last().unwrap();
+        assert_eq!(previous, &Some("Done reviewing".to_string()));
+        assert_eq!(current, &None);
     }
 
     #[tokio::test]
@@ -239,5 +281,27 @@ mod tests {
             .iter()
             .filter(|(_, event)| event.event == crate::api::schema::EventKind::PaneUpdated)
             .count()
+    }
+
+    fn pane_title_changed_events(
+        event_hub: &crate::api::EventHub,
+    ) -> Vec<(Option<String>, Option<String>)> {
+        event_hub
+            .events_after(0)
+            .iter()
+            .filter_map(|(_, event)| match &event.data {
+                crate::api::schema::EventData::PaneTitleChanged {
+                    pane,
+                    previous_terminal_title_stripped,
+                } => {
+                    assert_eq!(event.event, crate::api::schema::EventKind::PaneTitleChanged);
+                    Some((
+                        previous_terminal_title_stripped.clone(),
+                        pane.terminal_title_stripped.clone(),
+                    ))
+                }
+                _ => None,
+            })
+            .collect()
     }
 }
