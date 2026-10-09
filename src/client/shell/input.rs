@@ -612,12 +612,10 @@ impl ClientShellState {
                 {
                     self.mode = return_mode;
                     outcome.repaint = true;
+                    if workspace_panes::handle_prefix_binding(self, &binding, outcome) {
+                        return None;
+                    }
                     self.record_binding(binding, outcome);
-                    return None;
-                }
-                if workspace_panes::handle_prefix_key(self, key, outcome) {
-                    self.mode = return_mode;
-                    outcome.repaint = true;
                     return None;
                 }
                 self.mode = return_mode;

@@ -717,52 +717,286 @@ fn count_toggle_click_parks_and_unparks_without_focusing() {
     assert_eq!(state.hits.workspaces[0].rect, Rect::new(0, 2, 25, 4));
 }
 
+/// Snapshot with the server-published manifest entry for the sentinel,
+/// mirroring production: the server assigns local `[[keys.command]]`
+/// entries opaque command IDs, so the live binding carries the ID plus
+/// the original key labels, never the sentinel text.
+fn sentinel_snapshot(key_label: &str) -> ClientShellSnapshot {
+    let mut snapshot = two_workspace_snapshot();
+    snapshot.commands.push(crate::protocol::ClientShellCommand {
+        command_id: "cmd_test_park".into(),
+        binding_label: key_label.into(),
+        binding_labels: vec![key_label.into()],
+        action: crate::protocol::ClientShellCommandAction::Shell,
+        description: None,
+    });
+    snapshot
+}
+
 #[test]
-fn prefix_m_parks_and_unparks_focused_workspace() {
+fn sentinel_binding_parks_on_configured_key_only() {
     use crossterm::event::KeyCode;
-    let mut state = panes_state(&panes_config(), two_workspace_snapshot());
+    let config: Config = toml::from_str(
+        r#"
+[ui.sidebar]
+layout = "unified"
+
+[[keys.command]]
+key = "prefix+u"
+command = "unified:toggle-workspace-park"
+"#,
+    )
+    .expect("sentinel config");
+    let mut state = panes_state(&config, sentinel_snapshot("prefix+u"));
+    assert_eq!(state.config.keybinds.keybinds.custom_commands.len(), 1);
     let prefix = || crate::input::TerminalKey::new(KeyCode::Char('b'), KeyModifiers::CONTROL);
     let m = || crate::input::TerminalKey::new(KeyCode::Char('m'), KeyModifiers::empty());
+    let u = || crate::input::TerminalKey::new(KeyCode::Char('u'), KeyModifiers::empty());
 
     let _ = state.handle_raw_events(vec![RawInputEvent::Key(prefix())]);
-    assert_eq!(state.mode, ClientShellMode::Prefix);
-    let _ = state.handle_raw_events(vec![RawInputEvent::Key(m())]);
-    assert_eq!(state.mode, ClientShellMode::Terminal);
+    let outcome = state.handle_raw_events(vec![RawInputEvent::Key(m())]);
+    assert!(
+        !state
+            .collapsed_groups
+            .contains(&workspace_collapse_key("ws_1")),
+        "unbound prefix+m is a no-op with no sentinel on it"
+    );
+    assert!(outcome.actions.is_empty());
+    assert!(state.endpoint_error.is_none());
+
+    let _ = state.handle_raw_events(vec![RawInputEvent::Key(prefix())]);
+    let outcome = state.handle_raw_events(vec![RawInputEvent::Key(u())]);
     assert!(
         state
             .collapsed_groups
             .contains(&workspace_collapse_key("ws_1")),
-        "prefix+m parks the focused workspace"
+        "sentinel prefix+u parks the focused workspace"
     );
+    assert!(
+        outcome.actions.is_empty(),
+        "sentinel never dispatches a command"
+    );
+    assert!(state.endpoint_error.is_none());
+    let frame = state.compose(100, 16).expect("parked sidebar");
+    assert_eq!(
+        sidebar_rows(&frame)[2],
+        " repo                ≡2",
+        "sentinel-parked workspace renders as one count row"
+    );
+    assert_eq!(state.hits.workspaces[0].rect, Rect::new(0, 2, 25, 1));
 
     let _ = state.handle_raw_events(vec![RawInputEvent::Key(prefix())]);
-    let _ = state.handle_raw_events(vec![RawInputEvent::Key(m())]);
+    let _ = state.handle_raw_events(vec![RawInputEvent::Key(u())]);
     assert!(
         !state
             .collapsed_groups
             .contains(&workspace_collapse_key("ws_1")),
-        "prefix+m again unparks"
+        "sentinel prefix+u again unparks"
     );
 }
 
 #[test]
-fn prefix_m_stays_inert_in_classic_layout() {
+fn sentinel_on_prefix_m_parks_without_endpoint_error() {
     use crossterm::event::KeyCode;
-    let mut state = panes_state(&Config::default(), two_workspace_snapshot());
-    let _ = state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
-        KeyCode::Char('b'),
-        KeyModifiers::CONTROL,
-    ))]);
-    let _ = state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
-        KeyCode::Char('m'),
-        KeyModifiers::empty(),
-    ))]);
+    let config: Config = toml::from_str(
+        r#"
+[ui.sidebar]
+layout = "unified"
+
+[[keys.command]]
+key = "prefix+m"
+command = "unified:toggle-workspace-park"
+"#,
+    )
+    .expect("sentinel config");
+    let mut state = panes_state(&config, sentinel_snapshot("prefix+m"));
+    let prefix = || crate::input::TerminalKey::new(KeyCode::Char('b'), KeyModifiers::CONTROL);
+    let m = || crate::input::TerminalKey::new(KeyCode::Char('m'), KeyModifiers::empty());
+
+    let _ = state.handle_raw_events(vec![RawInputEvent::Key(prefix())]);
+    let outcome = state.handle_raw_events(vec![RawInputEvent::Key(m())]);
+    assert!(
+        state
+            .collapsed_groups
+            .contains(&workspace_collapse_key("ws_1")),
+        "sentinel prefix+m parks the focused workspace"
+    );
+    assert!(
+        outcome.actions.is_empty(),
+        "sentinel never dispatches a command"
+    );
+    assert!(state.endpoint_error.is_none());
+}
+
+#[test]
+fn non_sentinel_prefix_binding_still_reaches_record_binding() {
+    let mut state = panes_state(&panes_config(), two_workspace_snapshot());
+    let mut outcome = ClientShellInput::default();
+    let binding = crate::input::KeybindMatch::Action(crate::input::KeybindAction::NextTab);
+    assert!(!super::super::workspace_panes::handle_prefix_binding(
+        &mut state,
+        &binding,
+        &mut outcome
+    ));
+}
+
+#[test]
+fn sentinel_stays_inert_in_classic_layout() {
+    use crossterm::event::KeyCode;
+    let config: Config = toml::from_str(
+        r#"
+[[keys.command]]
+key = "prefix+u"
+command = "unified:toggle-workspace-park"
+"#,
+    )
+    .expect("sentinel config");
+    let mut state = panes_state(&config, sentinel_snapshot("prefix+u"));
+    let prefix = || crate::input::TerminalKey::new(KeyCode::Char('b'), KeyModifiers::CONTROL);
+    let u = || crate::input::TerminalKey::new(KeyCode::Char('u'), KeyModifiers::empty());
+    let _ = state.handle_raw_events(vec![RawInputEvent::Key(prefix())]);
+    let outcome = state.handle_raw_events(vec![RawInputEvent::Key(u())]);
     assert!(
         !state
             .collapsed_groups
             .contains(&workspace_collapse_key("ws_1")),
-        "classic layout ignores the unified park key"
+        "classic layout ignores the sentinel"
     );
+    assert!(outcome.actions.is_empty());
+    assert!(state.endpoint_error.is_none());
+}
+
+#[test]
+fn sentinel_stays_inert_in_collapsed_rail() {
+    use crossterm::event::KeyCode;
+    let config: Config = toml::from_str(
+        r#"
+[ui.sidebar]
+layout = "unified"
+
+[[keys.command]]
+key = "prefix+u"
+command = "unified:toggle-workspace-park"
+"#,
+    )
+    .expect("sentinel config");
+    let mut state = panes_state(&config, sentinel_snapshot("prefix+u"));
+    state.sidebar_collapsed = true;
+    let prefix = || crate::input::TerminalKey::new(KeyCode::Char('b'), KeyModifiers::CONTROL);
+    let u = || crate::input::TerminalKey::new(KeyCode::Char('u'), KeyModifiers::empty());
+    let _ = state.handle_raw_events(vec![RawInputEvent::Key(prefix())]);
+    let outcome = state.handle_raw_events(vec![RawInputEvent::Key(u())]);
+    assert!(
+        !state
+            .collapsed_groups
+            .contains(&workspace_collapse_key("ws_1")),
+        "collapsed rail swallows the sentinel without toggling"
+    );
+    assert!(outcome.actions.is_empty());
+    assert!(state.endpoint_error.is_none());
+}
+
+#[test]
+fn sentinel_without_focused_workspace_dispatches_nothing() {
+    use crossterm::event::KeyCode;
+    let config: Config = toml::from_str(
+        r#"
+[ui.sidebar]
+layout = "unified"
+
+[[keys.command]]
+key = "prefix+u"
+command = "unified:toggle-workspace-park"
+"#,
+    )
+    .expect("sentinel config");
+    let mut snapshot = sentinel_snapshot("prefix+u");
+    snapshot.focused_workspace_id = None;
+    let mut state = panes_state(&config, snapshot);
+    let prefix = || crate::input::TerminalKey::new(KeyCode::Char('b'), KeyModifiers::CONTROL);
+    let u = || crate::input::TerminalKey::new(KeyCode::Char('u'), KeyModifiers::empty());
+    let _ = state.handle_raw_events(vec![RawInputEvent::Key(prefix())]);
+    let outcome = state.handle_raw_events(vec![RawInputEvent::Key(u())]);
+    assert!(
+        !state
+            .collapsed_groups
+            .contains(&workspace_collapse_key("ws_1")),
+        "no focused workspace means nothing to park"
+    );
+    assert!(outcome.actions.is_empty());
+    assert!(state.endpoint_error.is_none());
+}
+
+#[test]
+fn sentinel_only_fires_on_the_local_keymap() {
+    let config: Config = toml::from_str(
+        r#"
+[ui.sidebar]
+layout = "unified"
+
+[[keys.command]]
+key = "prefix+u"
+command = "unified:toggle-workspace-park"
+"#,
+    )
+    .expect("sentinel config");
+    let mut state = panes_state(&config, sentinel_snapshot("prefix+u"));
+    let binding = crate::input::KeybindMatch::Command(
+        state.config.keybinds.keybinds.custom_commands[0].clone(),
+    );
+    let mut outcome = ClientShellInput::default();
+    assert!(super::super::workspace_panes::handle_prefix_binding(
+        &mut state,
+        &binding,
+        &mut outcome
+    ));
+    assert!(
+        state
+            .collapsed_groups
+            .contains(&workspace_collapse_key("ws_1")),
+        "local keymap toggles"
+    );
+    state.config.keybinding_source = ClientShellKeybindingSource::Endpoint;
+    let mut outcome = ClientShellInput::default();
+    assert!(
+        !super::super::workspace_panes::handle_prefix_binding(&mut state, &binding, &mut outcome),
+        "endpoint keymap never consumes, so colliding endpoint commands dispatch"
+    );
+}
+
+#[test]
+fn lone_command_reusing_one_sentinel_key_is_never_swallowed() {
+    let config: Config = toml::from_str(
+        r#"
+[ui.sidebar]
+layout = "unified"
+
+[[keys.command]]
+key = ["prefix+u", "prefix+m"]
+command = "unified:toggle-workspace-park"
+"#,
+    )
+    .expect("sentinel config");
+    let mut state = panes_state(&config, sentinel_snapshot("prefix+u"));
+    let lone = crate::config::CustomCommandKeybind {
+        bindings: crate::config::ActionKeybinds::prefix("m"),
+        label: "prefix+m".into(),
+        command: "cmd_real".into(),
+        action: crate::config::CustomCommandAction::Shell,
+        description: None,
+        width: None,
+        height: None,
+    };
+    let mut outcome = ClientShellInput::default();
+    assert!(
+        !super::super::workspace_panes::handle_prefix_binding(
+            &mut state,
+            &crate::input::KeybindMatch::Command(lone),
+            &mut outcome
+        ),
+        "[prefix+m] must not match the [prefix+u, prefix+m] sentinel set"
+    );
+    assert!(outcome.actions.is_empty());
 }
 
 #[test]

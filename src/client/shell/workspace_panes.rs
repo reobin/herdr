@@ -345,12 +345,12 @@ pub(super) fn handle_click(
     true
 }
 
-pub(super) fn handle_prefix_key(
+pub(super) fn handle_prefix_binding(
     shell: &mut ClientShellState,
-    key: &crate::input::TerminalKey,
+    binding: &crate::input::KeybindMatch,
     outcome: &mut ClientShellInput,
 ) -> bool {
-    upstream::handle_prefix_key(shell, key, outcome)
+    upstream::handle_prefix_binding(shell, binding, outcome)
 }
 
 #[cfg(test)]
