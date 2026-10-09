@@ -36,6 +36,18 @@ Inside each workspace, panes group under per-tab sections. Each pane row shows i
 
 Click a pane row to focus it. Click the `≡n` count at the right edge of a workspace header to park it: the block folds to a single row with just the name and the count, keeping the workspace open without its vertical cost. Click the count again to expand. The count shows the pane total and takes the hottest pane status color (red while blocked, peach while working, green when done, quiet otherwise), so a parked workspace still reports at a glance. Parked workspaces persist across restarts with the other sidebar collapse state. Clicking anywhere else on the header focuses the workspace as before; only the count toggles. When the sidebar is collapsed in unified layout, it shows workspaces only.
 
+## Parking workspaces from the keyboard
+
+There is no default key: parking from the keyboard is opt-in through the stock `[[keys.command]]` extension point with the sentinel command text below. Bind any prefix key; `prefix+m` is just the example.
+
+```toml
+[[keys.command]]
+key = "prefix+m"
+command = "unified:toggle-workspace-park"
+```
+
+The sentinel is consumed client-side before custom-command dispatch, so it never runs as a shell command and never needs an endpoint round trip. The key must use prefix form (`prefix+m`, not a bare or modified key): anything else never reaches the intercept and runs as a normal command. `type`, `width`, and `height` are ignored; `description` only feeds the help overlay entry, so describe the parking there. Only the local keymap can trigger it: remote or endpoint keymaps strip custom commands, sentinel included. A real action binding on the same key still wins through the existing resolve order, but do not reuse a sentinel key for another custom command. Spell the key canonical lowercase (`prefix+m`); other spellings of the same key may stop matching once the endpoint round trip replaces the command text. Like the count click, the key toggle is inert in classic layout and in the collapsed rail, and it shows up under the help overlay's custom section.
+
 ## What unified layout ignores
 
 In unified layout, `[ui.sidebar.spaces]` `rows` and `row_gap` plus `ui.sidebar.agents.row_gap` still parse but have no effect. `agent.view.set` still drives the mobile Agents list and agent navigation, just not the expanded sidebar. See [Configuration](/docs/configuration/) for the stock sidebar layouts this replaces.
