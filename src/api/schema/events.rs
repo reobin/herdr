@@ -54,6 +54,8 @@ pub enum Subscription {
     PaneClosed {},
     #[serde(rename = "pane.updated")]
     PaneUpdated {},
+    #[serde(rename = "pane.title_changed")]
+    PaneTitleChanged {},
     #[serde(rename = "pane.focused")]
     PaneFocused {},
     #[serde(rename = "pane.moved")]
@@ -211,6 +213,7 @@ pub enum EventKind {
     PaneCreated,
     PaneClosed,
     PaneUpdated,
+    PaneTitleChanged,
     PaneFocused,
     PaneMoved,
     PaneOutputChanged,
@@ -242,6 +245,7 @@ impl EventKind {
             EventKind::PaneCreated => "pane.created",
             EventKind::PaneClosed => "pane.closed",
             EventKind::PaneUpdated => "pane.updated",
+            EventKind::PaneTitleChanged => "pane.title_changed",
             EventKind::PaneFocused => "pane.focused",
             EventKind::PaneMoved => "pane.moved",
             EventKind::PaneOutputChanged => "pane.output_changed",
@@ -274,6 +278,7 @@ pub const KNOWN_EVENT_KINDS: &[EventKind] = &[
     EventKind::PaneCreated,
     EventKind::PaneClosed,
     EventKind::PaneUpdated,
+    EventKind::PaneTitleChanged,
     EventKind::PaneFocused,
     EventKind::PaneMoved,
     EventKind::PaneOutputChanged,
@@ -301,6 +306,7 @@ pub const PLUGIN_HOOK_EVENT_KINDS: &[EventKind] = &[
     EventKind::TabFocused,
     EventKind::PaneCreated,
     EventKind::PaneClosed,
+    EventKind::PaneTitleChanged,
     EventKind::PaneFocused,
     EventKind::PaneMoved,
     EventKind::PaneExited,
@@ -355,6 +361,7 @@ mod known_event_name_tests {
         assert!(!names.contains(&"workspace.metadata_updated"));
         assert!(!names.contains(&"pane.updated"));
         assert!(names.contains(&"pane.moved"));
+        assert!(names.contains(&"pane.title_changed"));
     }
 }
 
@@ -499,6 +506,11 @@ pub enum EventData {
     },
     PaneUpdated {
         pane: PaneInfo,
+    },
+    PaneTitleChanged {
+        pane: PaneInfo,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        previous_terminal_title_stripped: Option<String>,
     },
     PaneFocused {
         pane_id: String,

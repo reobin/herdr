@@ -497,6 +497,28 @@
             },
             {
               "properties": {
+                "pane": {
+                  "$ref": "#/schemas/event/$defs/PaneInfo"
+                },
+                "previous_terminal_title_stripped": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "type": {
+                  "const": "pane_title_changed",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "pane"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
                 "pane_id": {
                   "type": "string"
                 },
@@ -747,6 +769,7 @@
             "pane_created",
             "pane_closed",
             "pane_updated",
+            "pane_title_changed",
             "pane_focused",
             "pane_moved",
             "pane_output_changed",
@@ -4133,6 +4156,18 @@
             {
               "properties": {
                 "type": {
+                  "const": "pane.title_changed",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
                   "const": "pane.focused",
                   "type": "string"
                 }
@@ -7218,6 +7253,28 @@
             },
             {
               "properties": {
+                "pane": {
+                  "$ref": "#/schemas/success_response/$defs/PaneInfo"
+                },
+                "previous_terminal_title_stripped": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "type": {
+                  "const": "pane_title_changed",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "pane"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
                 "pane_id": {
                   "type": "string"
                 },
@@ -7483,6 +7540,7 @@
             "pane_created",
             "pane_closed",
             "pane_updated",
+            "pane_title_changed",
             "pane_focused",
             "pane_moved",
             "pane_output_changed",
