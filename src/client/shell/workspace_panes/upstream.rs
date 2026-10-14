@@ -490,11 +490,11 @@ pub(super) fn workspace_collapsed(collapsed: Option<&HashSet<String>>, workspace
     collapsed.is_some_and(|sets| sets.contains(&workspace_collapse_key(workspace_id)))
 }
 
-/// Parked workspaces show `≡n` for their pane count; the same text is the
-/// collapse toggle in every header. No arrows: one row versus many makes
-/// the state obvious, and the symbol keeps the row narrow.
+/// Parked workspaces show `△n` for their pane count; the same text is the
+/// collapse toggle in every header. One row versus many makes the state
+/// obvious, and the symbol keeps the row narrow.
 pub(super) fn collapse_count_text(pane_count: usize) -> String {
-    format!("≡{pane_count}")
+    format!("△{pane_count}")
 }
 
 pub(super) fn collapse_count_width(text: &str) -> usize {
