@@ -359,7 +359,7 @@ pub(super) fn workspace_collapse_key(workspace_id: &str) -> String {
 }
 
 /// Parking signal: blocked outranks working outranks done, and anything
-/// settled outranks idle/shell rows. The header count takes the worst
+/// settled outranks idle/shell rows. The header title takes the worst
 /// color so a parked workspace still reports its hottest pane.
 fn status_severity(status: AgentStatus) -> u8 {
     match status {
@@ -682,7 +682,7 @@ impl<'a> Active<'a> {
         upstream::workspace_collapsed(self.collapsed_set(machine), workspace_id)
     }
 
-    /// Pane count and hottest status for the header count. Sections
+    /// Pane count and hottest status for the header title. Sections
     /// already hold one row per pane, so this needs no second walk over
     /// the snapshot.
     fn pane_summary(&self, machine: usize, workspace_id: &str) -> (usize, AgentStatus) {
@@ -733,19 +733,22 @@ impl<'a> Active<'a> {
         let rows = header_rows(block.workspace, entry.indented);
         let palette = upstream::palette(self.config);
         let sections = self.sections(block.machine, facts.workspace_id);
-        // The count carries the hottest pane status: tertiary while the
+        // The title carries the hottest pane status: tertiary while the
         // workspace rests, signal-colored while anything needs attention.
-        // Bold follows the same emphasis as the name.
+        // The count stays neutral so hue alone marks the workspace name.
+        // Bold follows the same emphasis on both.
         let (pane_count, worst) = self.pane_summary(block.machine, facts.workspace_id);
         let emphasized = (show_focus && facts.focused) || selected || dragged;
-        let count = upstream::collapse_count_text(pane_count);
-        let count_style = Style::default()
+        let bold = if emphasized {
+            Modifier::BOLD
+        } else {
+            Modifier::empty()
+        };
+        let title_style = Style::default()
             .fg(upstream::status_color(worst, palette))
-            .add_modifier(if emphasized {
-                Modifier::BOLD
-            } else {
-                Modifier::empty()
-            });
+            .add_modifier(bold);
+        let count = upstream::collapse_count_text(pane_count);
+        let count_style = Style::default().fg(palette.overlay0).add_modifier(bold);
         let count = Some((count.as_str(), count_style));
         if self.parked(block.machine, facts.workspace_id) {
             // One row only: the name plus the count. Branch, tabs, and
@@ -761,6 +764,7 @@ impl<'a> Active<'a> {
                 dragged,
                 palette,
                 count,
+                title_style,
             );
             return;
         }
@@ -774,6 +778,7 @@ impl<'a> Active<'a> {
             dragged,
             palette,
             count,
+            title_style,
         );
         let Some(endpoint_id) = self.machines.get(block.machine).map(|machine| machine.id) else {
             return;
@@ -919,9 +924,11 @@ fn render_header(
     dragged: bool,
     palette: &Palette,
     count: Option<(&str, Style)>,
+    title_style: Style,
 ) {
-    // The name stays primary in every state; weight alone marks focus and
-    // the navigate cursor. The branch line stays tertiary in every state.
+    // The first row carries the hottest pane status; weight alone marks
+    // focus and the navigate cursor. Other rows keep their own styles:
+    // the branch line stays tertiary in every state.
     let emphasized = focused || selected || dragged;
     let workspace_style = Style::default()
         .fg(palette.text)
@@ -954,14 +961,18 @@ fn render_header(
                 y,
                 usize::from(width),
                 row,
-                workspace_style,
+                title_style,
                 secondary_style,
             );
         } else {
             let spans = upstream::token_spans(
                 row,
                 Style::default(),
-                workspace_style,
+                if row_index == 0 {
+                    title_style
+                } else {
+                    workspace_style
+                },
                 secondary_style,
                 Style::default().fg(palette.overlay1),
                 palette,
