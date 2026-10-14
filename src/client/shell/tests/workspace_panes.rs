@@ -201,12 +201,12 @@ fn panes_layout_renders_headers_gap_indent_and_pane_text_at_fixed_geometry() {
         vec![
             " spaces",
             "",
-            " repo                ≡2",
+            " repo                △2",
             " main",
             " │ $ shell",
             " │ $ shell",
             "",
-            " ws_2                ≡1",
+            " ws_2                △1",
             " │ ⠋ herdr / pi",
             " │",
             "",
@@ -306,21 +306,25 @@ fn navigate_selection_marks_type_with_a_block_fill() {
         }
     }
 
-    // Names stay primary everywhere; weight marks focus and cursor.
-    let name = row_of(" ws_2                ≡1");
-    assert_eq!(buffer[(1, name)].fg, palette.text);
+    // Names carry the hottest pane status; weight marks focus and cursor.
+    let name = row_of(" ws_2                △1");
+    assert_eq!(buffer[(1, name)].fg, palette.peach, "working name");
     assert!(
         buffer[(1, name)].modifier.contains(Modifier::BOLD),
         "selected name is bold"
     );
-    let focused = row_of(" repo                ≡2");
-    assert_eq!(buffer[(1, focused)].fg, palette.text);
+    let focused = row_of(" repo                △2");
+    assert_eq!(
+        buffer[(1, focused)].fg,
+        palette.overlay0,
+        "resting name stays quiet"
+    );
     assert!(
         buffer[(1, focused)].modifier.contains(Modifier::BOLD),
         "focused name stays bold"
     );
-    let idle = row_of(" ws_3                ≡0");
-    assert_eq!(buffer[(1, idle)].fg, palette.text);
+    let idle = row_of(" ws_3                △0");
+    assert_eq!(buffer[(1, idle)].fg, palette.overlay0);
     assert!(
         !buffer[(1, idle)].modifier.contains(Modifier::BOLD),
         "idle name is not bold"
@@ -650,12 +654,12 @@ fn parked_workspace_collapses_to_a_single_count_row() {
         vec![
             " spaces",
             "",
-            " repo                ≡2",
+            " repo                △2",
             " main",
             " │ $ shell",
             " │ $ shell",
             "",
-            " ws_2                ≡1",
+            " ws_2                △1",
             "",
             "",
             "",
@@ -692,7 +696,7 @@ fn parked_workspace_collapses_to_a_single_count_row() {
 fn count_toggle_click_parks_and_unparks_without_focusing() {
     let mut state = panes_state(&panes_config(), two_workspace_snapshot());
     state.compose(100, 16).expect("panes sidebar");
-    // The ws_1 `≡2` ends two cells before the 25-wide block edge.
+    // The ws_1 `△2` ends two cells before the 25-wide block edge.
     let outcome = left_click(&mut state, 22, 2);
     assert!(state.workspace_press.is_none(), "toggle never focuses");
     assert!(outcome.repaint);
@@ -703,7 +707,7 @@ fn count_toggle_click_parks_and_unparks_without_focusing() {
         "toggle persists through the stock collapsed groups"
     );
     let frame = state.compose(100, 16).expect("parked sidebar");
-    assert_eq!(sidebar_rows(&frame)[2], " repo                ≡2");
+    assert_eq!(sidebar_rows(&frame)[2], " repo                △2");
     assert_eq!(state.hits.workspaces[0].rect, Rect::new(0, 2, 25, 1));
 
     let outcome = left_click(&mut state, 22, 2);
@@ -713,7 +717,7 @@ fn count_toggle_click_parks_and_unparks_without_focusing() {
         .collapsed_groups
         .contains(&workspace_collapse_key("ws_1")));
     let frame = state.compose(100, 16).expect("unparked sidebar");
-    assert_eq!(sidebar_rows(&frame)[2], " repo                ≡2");
+    assert_eq!(sidebar_rows(&frame)[2], " repo                △2");
     assert_eq!(state.hits.workspaces[0].rect, Rect::new(0, 2, 25, 4));
 }
 
@@ -780,7 +784,7 @@ command = "unified:toggle-workspace-park"
     let frame = state.compose(100, 16).expect("parked sidebar");
     assert_eq!(
         sidebar_rows(&frame)[2],
-        " repo                ≡2",
+        " repo                △2",
         "sentinel-parked workspace renders as one count row"
     );
     assert_eq!(state.hits.workspaces[0].rect, Rect::new(0, 2, 25, 1));
@@ -1021,7 +1025,7 @@ fn parked_header_click_still_focuses_without_unparking() {
 }
 
 #[test]
-fn parked_count_takes_the_hottest_pane_status_color() {
+fn parked_title_takes_the_hottest_pane_status_color() {
     let mut snapshot = two_workspace_snapshot();
     snapshot.agents[0].agent_status = AgentStatus::Blocked;
     let mut state = panes_state(&panes_config(), snapshot);
@@ -1029,7 +1033,13 @@ fn parked_count_takes_the_hottest_pane_status_color() {
     let frame = state.compose(100, 16).expect("parked sidebar");
     let buffer = frame.to_ratatui_buffer().expect("buffer");
     let palette = &state.config.palette;
-    assert_eq!(buffer[(21, 7)].fg, palette.red);
+    assert_eq!(
+        buffer[(1, 7)].fg,
+        palette.red,
+        "parked title reports blocked"
+    );
+    assert!(!buffer[(1, 7)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buffer[(21, 7)].fg, palette.overlay0, "count stays neutral");
     assert!(!buffer[(21, 7)].modifier.contains(Modifier::BOLD));
 }
 
@@ -1047,7 +1057,7 @@ fn parked_remote_workspace_collapses_to_one_row() {
         .iter()
         .find(|hit| hit.workspace_id == "ws_1" && hit.endpoint_id == remote)
         .expect("remote workspace hit");
-    assert!(rows[remote_hit.rect.y as usize].ends_with("≡1"));
+    assert!(rows[remote_hit.rect.y as usize].ends_with("△1"));
     assert_eq!(
         state
             .hits
@@ -1262,7 +1272,7 @@ fn lone_tab_skips_its_header_and_keeps_the_spine() {
     assert_eq!(
         rows[2..6],
         [
-            " repo                ≡2",
+            " repo                △2",
             " main",
             " │ $ shell",
             " │ $ shell",
@@ -1316,7 +1326,7 @@ fn renamed_workspace_headers_keep_their_automatic_name_as_context() {
 }
 
 #[test]
-fn renamed_header_renders_slash_with_both_sides_primary() {
+fn renamed_header_renders_slash_with_both_sides_in_status_color() {
     let mut snapshot = snapshot();
     snapshot.workspaces[0].label = "manifest-order".into();
     snapshot.workspaces[0].custom_label = true;
@@ -1328,10 +1338,10 @@ fn renamed_header_renders_slash_with_both_sides_primary() {
         .iter()
         .position(|row| row.contains("manifest-or"))
         .expect("renamed header row") as u16;
-    assert_eq!(rows[header as usize], " repo / manifest-or… ≡1");
+    assert_eq!(rows[header as usize], " repo / manifest-or… △1");
     let buffer = frame.to_ratatui_buffer().expect("buffer");
     let palette = &state.config.palette;
-    assert_eq!(buffer[(2, header)].fg, palette.text);
+    assert_eq!(buffer[(2, header)].fg, palette.overlay0, "resting repo");
     assert!(
         buffer[(2, header)].modifier.contains(Modifier::BOLD),
         "focused repo is bold"
@@ -1342,7 +1352,7 @@ fn renamed_header_renders_slash_with_both_sides_primary() {
         "divider stays quiet"
     );
     // Label starts after ` repo / ` (1 + 4 + 3).
-    assert_eq!(buffer[(8, header)].fg, palette.text);
+    assert_eq!(buffer[(8, header)].fg, palette.overlay0, "resting label");
     assert!(
         buffer[(8, header)].modifier.contains(Modifier::BOLD),
         "focused label is bold"
@@ -1542,7 +1552,7 @@ fn tab_spine_spans_the_full_height_of_its_pane_rows() {
     assert_eq!(
         rows[2..10],
         [
-            " repo                ≡3",
+            " repo                △3",
             " main",
             " 1",
             " │ ⠋ herdr / pi",
@@ -1648,7 +1658,7 @@ fn tall_workspace_clips_pane_rows_to_the_sidebar_body() {
     assert!(hits
         .iter()
         .all(|(rect, _, _)| rect.y >= body.y && rect.y < body.bottom()));
-    assert_eq!(sidebar_rows(&frame)[2], " repo               ≡20");
+    assert_eq!(sidebar_rows(&frame)[2], " repo               △20");
 }
 
 #[test]
@@ -1677,15 +1687,15 @@ fn pane_rows_under_worktree_children_indent_with_spaces() {
     let rows = sidebar_rows(&frame);
     let start = rows
         .iter()
-        .position(|row| row == "       repo          ≡1")
+        .position(|row| row == "       repo          △1")
         .expect("first child header");
     assert_eq!(
         rows[start..start + 6],
         [
-            "       repo          ≡1",
+            "       repo          △1",
             "       worktree/ws_2",
             "       │ $ shell",
-            "       repo          ≡1",
+            "       repo          △1",
             "       worktree/ws_3",
             "       │ $ shell",
         ],
