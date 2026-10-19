@@ -157,11 +157,10 @@ impl<'a> WorkspacePanes<'a> {
             .map_or(&[], Vec::as_slice)
     }
 
-    /// Tab headers show only when a workspace holds more than one tab.
-    /// A lone tab skips its header, so the block reads workspace name,
-    /// branch, then directly the spine and panes. Height counts one row
-    /// per pane (plus reserved detail rows) and one header row per tab
-    /// group when headers show.
+    /// Every tab shows its header row, lone tabs included, so the block
+    /// always reads workspace name, branch, then one tree per tab.
+    /// Height counts one row per pane (plus reserved detail rows) and
+    /// one header row per tab group.
     pub(super) fn display_height(&self, workspace_id: &str) -> usize {
         sections_height(self.sections(workspace_id))
     }
@@ -173,7 +172,6 @@ impl<'a> WorkspacePanes<'a> {
 }
 
 fn sections_height(sections: &[WorkspacePaneSection<'_>]) -> usize {
-    let hide_tabs = sections.len() == 1;
     sections
         .iter()
         .map(|section| {
@@ -182,7 +180,7 @@ fn sections_height(sections: &[WorkspacePaneSection<'_>]) -> usize {
                 .iter()
                 .map(WorkspacePaneRow::display_height)
                 .sum::<usize>()
-                + usize::from(!hide_tabs)
+                + 1
         })
         .sum()
 }
@@ -744,13 +742,21 @@ impl<'a> Active<'a> {
         } else {
             Modifier::empty()
         };
-        let title_style = Style::default()
-            .fg(upstream::status_color(worst, palette))
-            .add_modifier(bold);
-        let count = upstream::collapse_count_text(pane_count);
+        // The name carries the hottest pane status while anything needs
+        // attention; a resting workspace reads primary instead of sinking
+        // to tertiary with every other row.
+        let title = match worst {
+            AgentStatus::Working | AgentStatus::Blocked | AgentStatus::Done => {
+                upstream::status_color(worst, palette)
+            }
+            AgentStatus::Idle | AgentStatus::Unknown => palette.text,
+        };
+        let title_style = Style::default().fg(title).add_modifier(bold);
+        let parked = self.parked(block.machine, facts.workspace_id);
+        let count = upstream::collapse_count_text(pane_count, parked);
         let count_style = Style::default().fg(palette.overlay0).add_modifier(bold);
         let count = Some((count.as_str(), count_style));
-        if self.parked(block.machine, facts.workspace_id) {
+        if parked {
             // One row only: the name plus the count. Branch, tabs, and
             // panes all give up their rows; the count keeps the pane
             // total visible and stays clickable to unpark.
@@ -808,9 +814,9 @@ struct PaneRowsTarget<'t> {
     summary_lift: bool,
 }
 
-/// Renamed header rows carry `[Branch(repo), Workspace(label)]` so the
-/// repo renders tertiary and the label primary. Anything else renders
-/// through the generic token spans.
+/// Renamed header rows carry `[Branch(repo), Workspace(label)]` so both
+/// sides render in the title style with a quiet divider. Anything else
+/// renders through the generic token spans.
 fn is_slash_header(row: &[Token]) -> bool {
     matches!(
         row,
@@ -965,6 +971,17 @@ fn render_header(
                 secondary_style,
             );
         } else {
+            // Branch rows render secondary, a step down from the title
+            // in every state; anything else on the row keeps its own
+            // style.
+            let branch_row = row
+                .iter()
+                .any(|token| matches!(token.kind, upstream::ResolvedTokenKind::Branch(_)));
+            let secondary = if branch_row {
+                Style::default().fg(palette.subtext0)
+            } else {
+                secondary_style
+            };
             let spans = upstream::token_spans(
                 row,
                 Style::default(),
@@ -973,7 +990,7 @@ fn render_header(
                 } else {
                     workspace_style
                 },
-                secondary_style,
+                secondary,
                 Style::default().fg(palette.overlay1),
                 palette,
                 usize::from(width),
@@ -1023,13 +1040,23 @@ fn pane_token_spans(
 }
 
 /// Draws tab headers and pane rows top-down in `rect`, recording one click
-/// target per visible pane row. Tab headers align with the workspace header
-/// and pane rows indent two spaces under their tab, with summaries under
-/// their pane. A lone tab skips its header, so its pane rows follow the
-/// workspace header directly with the spine still hanging at the tab
-/// column. A quiet spine hangs below each tab name across the full
-/// height of its pane rows. The spine follows its tab: primary while the
-/// tab holds focus, quiet otherwise.
+/// target per visible pane row. Every tab shows its header with an `├─`
+/// tee, so the block always reads workspace name, branch, then one tree
+/// per tab. Pane
+/// rows sit one column under their tab, with summaries under their pane.
+/// One continuous pipe runs past the tabs: every pane and summary row
+/// carries the straight spine, in every tab of every workspace, so the
+/// column never breaks between states. The spine stays solid from the top
+/// through the selected tab and fades past it; only the selected tab's
+/// `─` branch goes bold. The selection otherwise reads through title
+/// color and weight alone, never a branch. Unfocused tabs fade their
+/// headers, shell rows, summaries and spine, but agent titles and glyphs
+/// keep their signal hue everywhere, losing only bold. The spine follows
+/// its tab: solid while the selection sits at or below it, quiet on
+/// background machines, faded past the selection. Unfocused tabs fade
+/// their headers, summaries, elapsed and spine to dim tertiary; shell
+/// rows sit tertiary undimmed, and agent rows keep their hue through
+/// the fade.
 fn render_pane_rows(
     buffer: &mut Buffer,
     rect: Rect,
@@ -1055,55 +1082,75 @@ fn render_pane_rows(
     let record_hits = upstream::mouse_capture(config);
     let right = rect.right().saturating_sub(2);
     let now = now_ms();
-    // Tabs align with the workspace header; panes indent two spaces under
-    // their tab with a quiet spine hanging below the tab name across the
-    // full height of the tab's pane rows. A lone tab skips its header so
-    // the block reads workspace name, branch, then directly spine + panes.
-    let hide_tabs = sections.len() == 1;
+    // Tabs align with the workspace header; pane content sits one column
+    // under its tab, with the spine at the tab column and summaries
+    // under their pane.
     let base_x = rect.x.saturating_add(if entry.indented { 7 } else { 1 });
     let tab_x = base_x;
-    let pane_x = tab_x.saturating_add(2);
+    let content_x = tab_x.saturating_add(3);
     let mut y = rect.y;
-    for section in sections.iter() {
+    // Solidity follows the selection: every section up to and including
+    // the focused pane's own stays lit, the rest fade. Presence never
+    // depends on focus, only brightness does.
+    let selected_section = sections
+        .iter()
+        .position(|section| section.rows.iter().any(|row| row.focused));
+    let lit_at = |position: usize| selected_section.is_some_and(|index| position <= index);
+    for (position, section) in sections.iter().enumerate() {
         if y >= rect.bottom() {
             return;
         }
-        // The selected tab goes primary without bold; the cursor never
-        // lifts tabs, and unfocused ones sit with the branch line. The
-        // spine follows its tab: primary while the tab holds focus, quiet
-        // otherwise, never bold either way.
-        let spine_style = if section.tab_focused && show_focus {
+        // Every tab header tees into the pipe: pane rows always continue
+        // below, so a closing corner would break the line. The `├` keeps
+        // the column connected from the first header to the last row.
+        let active = section.tab_focused;
+        let faded = Style::default()
+            .fg(palette.overlay0)
+            .add_modifier(Modifier::DIM);
+        // The selected tab's `─` branch alone goes bold; the cursor never
+        // lifts tabs, and unfocused ones fade to dim tertiary. The spine
+        // stays solid from the top through the selected tab and fades
+        // past it: lit while the machine shows focus, quiet otherwise,
+        // never bold either way. The `├` cell shares the spine style so
+        // the column reads as one line.
+        let lit = show_focus && lit_at(position);
+        let spine_style = if lit {
+            Style::default().fg(palette.text)
+        } else if active {
+            Style::default().fg(palette.overlay0)
+        } else {
+            faded
+        };
+        let tab_style = if active && show_focus {
+            Style::default()
+                .fg(palette.text)
+                .add_modifier(Modifier::BOLD)
+        } else if active {
             Style::default().fg(palette.text)
         } else {
-            Style::default().fg(palette.overlay0)
+            faded
         };
-        if !hide_tabs {
-            let tab_style = if section.tab_focused && show_focus {
-                Style::default().fg(palette.text)
-            } else {
-                Style::default().fg(palette.overlay0)
-            };
-            put_text(
-                buffer,
-                tab_x,
-                y,
-                right.saturating_sub(tab_x),
-                section.tab_label,
-                tab_style,
-            );
-            y = y.saturating_add(1);
-        }
+        let branch_x = put_segment(buffer, tab_x, y, right, "├", spine_style);
+        put_text(
+            buffer,
+            branch_x,
+            y,
+            right.saturating_sub(branch_x),
+            &format!("─ {}", section.tab_label),
+            tab_style,
+        );
+        y = y.saturating_add(1);
         for pane_row in section.rows.iter() {
             if y >= rect.bottom() {
                 return;
             }
-            // The spine hangs below the tab name across every pane row,
-            // so each tab reads as one block.
+            // The spine runs straight through every pane row in every
+            // tab; presence never depends on focus, only its color does.
             put_segment(buffer, base_x, y, right, "│", spine_style);
-            // Signal rows carry their glyph hue in the title: working peach,
-            // done green, blocked red (bold when focused). Idle and unknown
-            // stay as today: primary bold when focused, tertiary otherwise.
-            // The cursor never changes row color.
+            // Agent rows keep their hue in every tab, selected or not:
+            // working peach, blocked red, done green, with bold alone
+            // marking focus. Idle stays tertiary unless focused, when it
+            // goes primary and bold. The cursor never changes row color.
             let text_style = match pane_row.status {
                 AgentStatus::Working | AgentStatus::Blocked | AgentStatus::Done => Style::default()
                     .fg(upstream::status_color(pane_row.status, palette))
@@ -1118,26 +1165,25 @@ fn render_pane_rows(
                     }
                 }
             };
-            // Shell panes were never classified, so they carry a dim `$`
-            // where an agent shows its status glyph. The label keeps the
-            // row hue.
+            // The status glyph keeps its hue wherever the pane sits, like
+            // the title. Shell panes were never classified, so they carry
+            // a dim `$` where an agent shows its status glyph. The label
+            // keeps the row hue.
+            let glyph_style = if pane_row.status == AgentStatus::Unknown {
+                Style::default().fg(palette.overlay0)
+            } else {
+                Style::default().fg(upstream::status_color(pane_row.status, palette))
+            };
             let x = if pane_row.status == AgentStatus::Unknown {
-                put_segment(
-                    buffer,
-                    pane_x,
-                    y,
-                    right,
-                    "$",
-                    Style::default().fg(palette.overlay0),
-                )
+                put_segment(buffer, content_x, y, right, "$", glyph_style)
             } else {
                 put_segment(
                     buffer,
-                    pane_x,
+                    content_x,
                     y,
                     right,
                     upstream::status_icon(pane_row.status, config),
-                    Style::default().fg(upstream::status_color(pane_row.status, palette)),
+                    glyph_style,
                 )
             };
             // Agents hang their status elapsed off the right edge of the
@@ -1178,15 +1224,19 @@ fn render_pane_rows(
                 Paragraph::new(Line::from(spans)).render(Rect::new(x, y, width, 1), buffer);
             }
             if let Some(text) = elapsed {
-                // Quiet tertiary like the branch line: the elapsed time
-                // informs without outshining the row title.
+                // Quiet tertiary: the elapsed time informs without
+                // outshining the row title, fading with unfocused tabs.
                 put_text(
                     buffer,
                     right.saturating_sub(text.len() as u16),
                     y,
                     text.len() as u16,
                     &text,
-                    Style::default().fg(palette.overlay0),
+                    if active {
+                        Style::default().fg(palette.overlay0)
+                    } else {
+                        faded
+                    },
                 );
             }
             if record_hits {
@@ -1202,16 +1252,19 @@ fn render_pane_rows(
                 if y >= rect.bottom() {
                     return;
                 }
-                // The spine runs through summary rows too, so the line
-                // spans the tab's full height.
+                // The spine runs through summary rows too, like pane rows.
                 put_segment(buffer, base_x, y, right, "│", spine_style);
                 if !detail.is_empty() {
                     let width = right.saturating_sub(x);
                     let mut spans = vec![Span::raw(" ")];
                     // Summaries stay tertiary unless their own pane holds
                     // focus or the workspace carries the cursor, never bold.
+                    // Summaries of unfocused tabs fade with their tab, but
+                    // the cursor still lifts them like a selection.
                     let detail_style = if (pane_row.focused && show_focus) || summary_lift {
                         Style::default().fg(palette.subtext0)
+                    } else if !active {
+                        faded
                     } else {
                         Style::default().fg(palette.overlay0)
                     };

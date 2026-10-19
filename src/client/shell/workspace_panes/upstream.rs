@@ -490,11 +490,12 @@ pub(super) fn workspace_collapsed(collapsed: Option<&HashSet<String>>, workspace
     collapsed.is_some_and(|sets| sets.contains(&workspace_collapse_key(workspace_id)))
 }
 
-/// Parked workspaces show `△n` for their pane count; the same text is the
-/// collapse toggle in every header. One row versus many makes the state
-/// obvious, and the symbol keeps the row narrow.
-pub(super) fn collapse_count_text(pane_count: usize) -> String {
-    format!("△{pane_count}")
+/// Pane count toggle: `▾n` while expanded, `▸n` once parked. The same
+/// text is the collapse toggle in every header. One row versus many
+/// makes the state obvious twice over, and the symbol keeps the row
+/// narrow.
+pub(super) fn collapse_count_text(pane_count: usize, parked: bool) -> String {
+    format!("{}{pane_count}", if parked { "▸" } else { "▾" })
 }
 
 pub(super) fn collapse_count_width(text: &str) -> usize {
@@ -558,8 +559,14 @@ pub(super) fn collapse_toggle_at(
             return None;
         }
         let count = workspace_pane_count(shell, &hit.endpoint_id, &hit.workspace_id);
-        let toggle =
-            collapse_toggle_rect(hit.rect, collapse_count_width(&collapse_count_text(count)));
+        let parked = workspace_collapsed(
+            shell.collapsed_groups_for_endpoint(&hit.endpoint_id),
+            &hit.workspace_id,
+        );
+        let toggle = collapse_toggle_rect(
+            hit.rect,
+            collapse_count_width(&collapse_count_text(count, parked)),
+        );
         super::super::contains(toggle, point)
             .then(|| (hit.endpoint_id.clone(), hit.workspace_id.clone()))
     })
