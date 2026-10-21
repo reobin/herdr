@@ -246,9 +246,19 @@ fn now_ms() -> u64 {
 /// then branch and ahead/behind when known, for every workspace including
 /// linked worktree children. The renamed first row carries two tokens so
 /// both sides render primary with a quiet slash divider.
-pub(super) fn header_rows(workspace: &ClientShellWorkspace, _indented: bool) -> Vec<Vec<Token>> {
+/// Workspace header: the repo context resolves from the workspace's first
+/// pane cwd, so the name tracks the identity source instead of following
+/// focus. Falls back to `new_workspace_cwd` without a snapshot.
+pub(super) fn header_rows(
+    snapshot: Option<&ClientShellSnapshot>,
+    workspace: &ClientShellWorkspace,
+    _indented: bool,
+) -> Vec<Vec<Token>> {
     let facts = upstream::workspace(workspace);
-    let (repo, name) = header_names(&facts);
+    let cwd = snapshot
+        .and_then(|snapshot| upstream::first_pane_cwd(snapshot, facts.workspace_id))
+        .unwrap_or(facts.cwd);
+    let (repo, name) = header_names(&facts, cwd);
     let mut rows = match (repo, name) {
         (Some(repo), name) => vec![vec![
             upstream::branch_token(&repo),
@@ -278,12 +288,12 @@ pub(super) fn header_rows(workspace: &ClientShellWorkspace, _indented: bool) -> 
 /// checkouts, the directory name outside repos, or the label with no repo.
 /// The repo leads so sibling worktrees of one repo share one context even
 /// when checked out at different paths.
-fn header_names(facts: &WorkspaceFacts<'_>) -> (Option<String>, String) {
+fn header_names(facts: &WorkspaceFacts<'_>, cwd: &str) -> (Option<String>, String) {
     let repo: Option<String> = facts
         .repo
         .map(str::to_owned)
-        .or_else(|| upstream::repo_name_for_cwd(facts.cwd))
-        .or_else(|| cwd_dir_name(facts.cwd).map(str::to_owned));
+        .or_else(|| upstream::repo_name_for_cwd(cwd))
+        .or_else(|| cwd_dir_name(cwd).map(str::to_owned));
     if facts.custom_label {
         match repo {
             Some(repo) => (Some(repo), facts.label.to_owned()),
@@ -663,9 +673,7 @@ impl<'a> Active<'a> {
     }
 
     fn workspace_height(&self, machine: usize, entry: &WorkspaceEntry) -> u16 {
-        self.machines
-            .get(machine)
-            .and_then(|machine| machine.snapshot)
+        self.snapshot(machine)
             .and_then(|snapshot| upstream::workspace_at(snapshot, upstream::entry(entry).index))
             .map_or(1, |workspace| self.block_height(machine, workspace, entry))
     }
@@ -678,6 +686,12 @@ impl<'a> Active<'a> {
 
     fn parked(&self, machine: usize, workspace_id: &str) -> bool {
         upstream::workspace_collapsed(self.collapsed_set(machine), workspace_id)
+    }
+
+    fn snapshot(&self, machine: usize) -> Option<&'a ClientShellSnapshot> {
+        self.machines
+            .get(machine)
+            .and_then(|machine| machine.snapshot)
     }
 
     /// Pane count and hottest status for the header title. Sections
@@ -707,7 +721,12 @@ impl<'a> Active<'a> {
         if self.parked(machine, workspace_id) {
             return 1;
         }
-        let header = header_rows(workspace, upstream::entry(entry).indented).len();
+        let header = header_rows(
+            self.snapshot(machine),
+            workspace,
+            upstream::entry(entry).indented,
+        )
+        .len();
         let panes = self
             .machines
             .get(machine)
@@ -728,7 +747,11 @@ impl<'a> Active<'a> {
     ) {
         let entry = upstream::entry(block.entry);
         let facts = upstream::workspace(block.workspace);
-        let rows = header_rows(block.workspace, entry.indented);
+        let rows = header_rows(
+            self.snapshot(block.machine),
+            block.workspace,
+            entry.indented,
+        );
         let palette = upstream::palette(self.config);
         let sections = self.sections(block.machine, facts.workspace_id);
         // The title carries the hottest pane status: tertiary while the

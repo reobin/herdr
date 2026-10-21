@@ -354,6 +354,25 @@ pub(super) fn workspace_at(
     snapshot.workspaces.get(index)
 }
 
+/// First pane cwd in snapshot order. The server sends panes workspace-major
+/// and tab-minor, so the first match is the identity source instead of the
+/// focused pane.
+pub(super) fn first_pane_cwd<'s>(
+    snapshot: &'s ClientShellSnapshot,
+    workspace_id: &str,
+) -> Option<&'s str> {
+    snapshot
+        .panes
+        .iter()
+        .filter(|pane| pane.workspace_id == workspace_id)
+        .find_map(|pane| {
+            pane.cwd
+                .as_deref()
+                .filter(|cwd| !cwd.is_empty())
+                .or_else(|| pane.foreground_cwd.as_deref().filter(|cwd| !cwd.is_empty()))
+        })
+}
+
 fn repo_name_cache() -> &'static Mutex<HashMap<String, Option<String>>> {
     static CACHE: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
