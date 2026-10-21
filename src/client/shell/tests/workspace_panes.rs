@@ -160,7 +160,7 @@ fn two_workspace_snapshot() -> ClientShellSnapshot {
 }
 
 fn header_name(workspace: &ClientShellWorkspace, indented: bool) -> String {
-    header_rows(workspace, indented)[0]
+    header_rows(None, workspace, indented)[0]
         .iter()
         .find_map(|token| match &token.kind {
             ResolvedTokenKind::Workspace(name) => Some(name.clone()),
@@ -170,7 +170,7 @@ fn header_name(workspace: &ClientShellWorkspace, indented: bool) -> String {
 }
 
 fn header_title(workspace: &ClientShellWorkspace, indented: bool) -> String {
-    header_rows(workspace, indented)[0]
+    header_rows(None, workspace, indented)[0]
         .iter()
         .filter_map(|token| match &token.kind {
             ResolvedTokenKind::Branch(name) | ResolvedTokenKind::Workspace(name) => {
@@ -1373,7 +1373,7 @@ fn renamed_workspace_headers_keep_their_automatic_name_as_context() {
     assert_eq!(header_name(&top, false), "review");
     assert_eq!(header_title(&top, false), "herdr / review");
     assert_eq!(
-        header_rows(&top, false)[0]
+        header_rows(None, &top, false)[0]
             .iter()
             .map(|token| &token.kind)
             .collect::<Vec<_>>(),
@@ -1398,6 +1398,57 @@ fn renamed_workspace_headers_keep_their_automatic_name_as_context() {
     bare.custom_label = false;
     assert_eq!(header_name(&bare, false), "scratch");
     assert_eq!(header_title(&bare, false), "scratch");
+}
+
+#[test]
+fn workspace_header_follows_first_pane_not_focused_one() {
+    let mut snap = snapshot();
+    snap.panes[0].cwd = Some("/repo/alpha".into());
+    snap.panes[0].foreground_cwd = Some("/repo/alpha".into());
+    snap.panes[0].focused = false;
+    snap.tabs.push(tab("tab_2", "ws_1", 2, "2"));
+    snap.tabs[1].focused = true;
+    snap.tabs[0].focused = false;
+    snap.panes.push(ClientShellPane {
+        pane_id: "pane_2".into(),
+        workspace_id: "ws_1".into(),
+        tab_id: "tab_2".into(),
+        label: None,
+        cwd: Some("/repo/beta".into()),
+        foreground_cwd: Some("/repo/beta".into()),
+        focused: true,
+        right_click_passthrough: false,
+    });
+    snap.focused_tab_id = Some("tab_2".into());
+    snap.focused_pane_id = Some("pane_2".into());
+    let mut ws = snap.workspaces[0].clone();
+    // The server names from the first pane but points new shells at focus.
+    ws.label = "alpha".into();
+    ws.custom_label = false;
+    ws.active_tab_id = "tab_2".into();
+    ws.new_workspace_cwd = "/repo/beta".into();
+    let name = header_rows(Some(&snap), &ws, false)[0]
+        .iter()
+        .find_map(|token| match &token.kind {
+            ResolvedTokenKind::Workspace(name) => Some(name.clone()),
+            _ => None,
+        })
+        .expect("workspace token");
+    assert_eq!(name, "alpha");
+
+    ws.custom_label = true;
+    ws.label = "review".into();
+    let title = header_rows(Some(&snap), &ws, false)[0]
+        .iter()
+        .filter_map(|token| match &token.kind {
+            ResolvedTokenKind::Branch(name) | ResolvedTokenKind::Workspace(name) => {
+                Some(name.clone())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" / ");
+    assert_eq!(title, "alpha / review");
 }
 
 #[test]
@@ -1486,7 +1537,7 @@ fn header_resolves_base_repo_through_linked_checkout_without_worktree_field() {
 fn header_details_show_only_known_git_values_for_children_too() {
     let mut workspace = snapshot().workspaces.remove(0);
     workspace.git_ahead_behind = Some((2, 1));
-    let rows = header_rows(&workspace, false);
+    let rows = header_rows(None, &workspace, false);
     assert_eq!(rows.len(), 2);
     assert_eq!(
         rows[1].iter().map(|token| &token.kind).collect::<Vec<_>>(),
@@ -1499,7 +1550,7 @@ fn header_details_show_only_known_git_values_for_children_too() {
         ]
     );
     assert_eq!(
-        header_rows(&workspace, true)
+        header_rows(None, &workspace, true)
             .iter()
             .map(|row| row.iter().map(|token| &token.kind).collect::<Vec<_>>())
             .collect::<Vec<_>>(),
@@ -1509,9 +1560,9 @@ fn header_details_show_only_known_git_values_for_children_too() {
     );
     workspace.branch = None;
     workspace.git_ahead_behind = Some((0, 0));
-    assert_eq!(header_rows(&workspace, false).len(), 1);
-    assert_eq!(header_rows(&workspace, true).len(), 1);
-    assert!(header_rows(&workspace, false)
+    assert_eq!(header_rows(None, &workspace, false).len(), 1);
+    assert_eq!(header_rows(None, &workspace, true).len(), 1);
+    assert!(header_rows(None, &workspace, false)
         .iter()
         .flatten()
         .all(|token| token.kind != ResolvedTokenKind::StateIcon));
