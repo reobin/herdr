@@ -267,7 +267,7 @@ fn panes_layout_renders_headers_gap_indent_and_pane_text_at_fixed_geometry() {
     // only bold; the glyph never fades with the rest of the tab.
     assert_eq!(
         buffer[(4, 10)].fg,
-        state.config.palette.peach,
+        ratatui::style::Color::Yellow,
         "background tab keeps its working glyph hue"
     );
     assert!(
@@ -314,7 +314,11 @@ fn navigate_selection_marks_type_with_a_block_fill() {
 
     // Names carry the hottest pane status; weight marks focus and cursor.
     let name = row_of(" ws_2                ▾1");
-    assert_eq!(buffer[(1, name)].fg, palette.peach, "working name");
+    assert_eq!(
+        buffer[(1, name)].fg,
+        ratatui::style::Color::Yellow,
+        "working name"
+    );
     assert!(
         buffer[(1, name)].modifier.contains(Modifier::BOLD),
         "selected name is bold"
@@ -368,7 +372,7 @@ fn navigate_selection_marks_type_with_a_block_fill() {
     // Unselected agent rows keep their signal hue and lose only bold.
     assert_eq!(
         buffer[(6, working_pane)].fg,
-        palette.peach,
+        ratatui::style::Color::Yellow,
         "background tab keeps its working title hue"
     );
     assert!(
@@ -381,7 +385,7 @@ fn navigate_selection_marks_type_with_a_block_fill() {
     );
     assert_eq!(
         buffer[(4, working_pane)].fg,
-        palette.peach,
+        ratatui::style::Color::Yellow,
         "background tab keeps its working glyph hue"
     );
 }
@@ -413,14 +417,14 @@ fn agent_rows_follow_activity_detail_lifts_with_selection() {
         .expect("pane row") as u16;
     assert_eq!(
         buffer[(6, pane)].fg,
-        palette.peach,
+        ratatui::style::Color::Yellow,
         "focused working pane keeps its signal hue"
     );
     assert!(buffer[(6, pane)].modifier.contains(Modifier::BOLD));
     // The status glyph carries the working hue next to the title.
     assert_eq!(
         buffer[(4, pane)].fg,
-        palette.peach,
+        ratatui::style::Color::Yellow,
         "status glyph keeps the working title hue"
     );
     let detail = pane + 1;
@@ -524,7 +528,7 @@ fn idle_agent_rows_sink_to_tertiary() {
 #[test]
 fn signal_statuses_paint_title_and_glyph_with_the_signal_hue() {
     for (status, expected) in [
-        (AgentStatus::Working, "peach"),
+        (AgentStatus::Working, "yellow"),
         (AgentStatus::Blocked, "red"),
         (AgentStatus::Idle, "overlay0"),
     ] {
@@ -550,7 +554,7 @@ fn signal_statuses_paint_title_and_glyph_with_the_signal_hue() {
             let buffer = frame.to_ratatui_buffer().expect("buffer");
             let palette = &state.config.palette;
             let expected = match expected {
-                "peach" => palette.peach,
+                "yellow" => ratatui::style::Color::Yellow,
                 "red" => palette.red,
                 _ => palette.overlay0,
             };

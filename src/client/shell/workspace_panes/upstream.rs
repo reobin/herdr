@@ -77,14 +77,14 @@ fn working_spinner_frame(now: std::time::Instant) -> &'static str {
         [(elapsed.as_millis() / SPINNER_FRAME_MS) as usize % WORKING_SPINNER_FRAMES.len()]
 }
 
-/// Unified status colors: peach working, red blocked, green done, grey idle
-/// and unknown. Classic layout keeps its own mapping untouched; this
+/// Unified status colors: terminal yellow working, red blocked, green done,
+/// grey idle and unknown. Classic layout keeps its own mapping untouched; this
 /// override only drives unified pane rows through the calls below. Done
 /// takes green by the usual success convention while idle drops to tertiary,
 /// so the resting default never outshines active work.
 pub(super) fn status_color(status: AgentStatus, palette: &Palette) -> ratatui::style::Color {
     match status {
-        AgentStatus::Working => palette.peach,
+        AgentStatus::Working => ratatui::style::Color::Yellow,
         AgentStatus::Blocked => palette.red,
         AgentStatus::Done => palette.green,
         AgentStatus::Idle | AgentStatus::Unknown => palette.overlay0,
