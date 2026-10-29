@@ -203,11 +203,11 @@ fn panes_layout_renders_headers_gap_indent_and_pane_text_at_fixed_geometry() {
             "",
             " repo                ▾2",
             " main",
-            " ├─ $ shell",
-            " │  $ shell",
+            " │ $ shell",
+            " │ $ shell",
             "",
             " ws_2                ▾1",
-            " ├─ ⠋ herdr / pi",
+            " │ ⠋ herdr / pi",
             " │",
             "",
             "",
@@ -266,12 +266,12 @@ fn panes_layout_renders_headers_gap_indent_and_pane_text_at_fixed_geometry() {
     // Agent rows keep their working hue in background tabs too, losing
     // only bold; the glyph never fades with the rest of the tab.
     assert_eq!(
-        buffer[(4, 8)].fg,
+        buffer[(3, 8)].fg,
         ratatui::style::Color::Yellow,
         "background tab keeps its working glyph hue"
     );
     assert!(
-        !buffer[(4, 8)].modifier.contains(Modifier::DIM),
+        !buffer[(3, 8)].modifier.contains(Modifier::DIM),
         "background glyph never dims"
     );
 }
@@ -351,39 +351,39 @@ fn navigate_selection_marks_type_with_a_block_fill() {
         "branch stays secondary when focused"
     );
 
-    // A lone tab skips its header; its first pane hangs off the tee.
+    // A lone tab skips its header; its panes run straight down the spine.
     assert!(
-        rows.iter().any(|row| row == " ├─ $ shell"),
-        "lone tab hangs its first pane off the tee: {rows:?}"
+        rows.iter().any(|row| row == " │ $ shell"),
+        "lone tab runs straight down the spine: {rows:?}"
     );
     assert!(
-        rows.iter().any(|row| row == " ├─ ⠋ herdr / pi"),
-        "second lone tab hangs its first pane off the tee: {rows:?}"
+        rows.iter().any(|row| row == " │ ⠋ herdr / pi"),
+        "second lone tab runs straight down the spine: {rows:?}"
     );
 
     // Idle rows sit with the branch line while the focused pane goes
     // primary and bold. Signal rows carry their glyph hue in the title.
-    // Columns come from the spaced layout: icon/blank at 5, text from 7.
-    let focused_pane = row_of(" ├─ $ shell");
+    // Columns come from the tight lone-tab layout: glyph at 3, text at 5.
+    let focused_pane = row_of(" │ $ shell");
     assert_eq!(buffer[(5, focused_pane)].fg, palette.text);
     assert!(buffer[(5, focused_pane)].modifier.contains(Modifier::BOLD));
-    let working_pane = row_of(" ├─ ⠋ herdr / pi");
+    let working_pane = row_of(" │ ⠋ herdr / pi");
     // Unselected agent rows keep their signal hue and lose only bold.
     assert_eq!(
-        buffer[(6, working_pane)].fg,
+        buffer[(5, working_pane)].fg,
         ratatui::style::Color::Yellow,
         "background tab keeps its working title hue"
     );
     assert!(
-        !buffer[(6, working_pane)].modifier.contains(Modifier::BOLD),
+        !buffer[(5, working_pane)].modifier.contains(Modifier::BOLD),
         "unselected title is not bold"
     );
     assert!(
-        !buffer[(6, working_pane)].modifier.contains(Modifier::DIM),
+        !buffer[(5, working_pane)].modifier.contains(Modifier::DIM),
         "unselected title never dims"
     );
     assert_eq!(
-        buffer[(4, working_pane)].fg,
+        buffer[(3, working_pane)].fg,
         ratatui::style::Color::Yellow,
         "background tab keeps its working glyph hue"
     );
@@ -415,14 +415,14 @@ fn agent_rows_follow_activity_detail_lifts_with_selection() {
         .position(|row| row.contains("herdr / pi"))
         .expect("pane row") as u16;
     assert_eq!(
-        buffer[(6, pane)].fg,
+        buffer[(5, pane)].fg,
         ratatui::style::Color::Yellow,
         "focused working pane keeps its signal hue"
     );
-    assert!(buffer[(6, pane)].modifier.contains(Modifier::BOLD));
+    assert!(buffer[(5, pane)].modifier.contains(Modifier::BOLD));
     // The status glyph carries the working hue next to the title.
     assert_eq!(
-        buffer[(4, pane)].fg,
+        buffer[(3, pane)].fg,
         ratatui::style::Color::Yellow,
         "status glyph keeps the working title hue"
     );
@@ -432,8 +432,8 @@ fn agent_rows_follow_activity_detail_lifts_with_selection() {
         "detail row: {rows:?}"
     );
     // The focused workspace lifts the summary even without the cursor.
-    assert_eq!(buffer[(6, detail)].fg, palette.subtext0);
-    assert!(!buffer[(6, detail)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buffer[(5, detail)].fg, palette.subtext0);
+    assert!(!buffer[(5, detail)].modifier.contains(Modifier::BOLD));
 
     // Background workspaces stay tertiary: focus back on ws_1 while the
     // cursor sits there too keeps ws_2 quiet.
@@ -455,14 +455,14 @@ fn agent_rows_follow_activity_detail_lifts_with_selection() {
     state.navigate_workspace_id = state.navigation_target(&ClientEndpointId::Local, "ws_1");
     let frame = state.compose(100, 16).expect("background agent");
     let buffer = frame.to_ratatui_buffer().expect("buffer");
-    assert_eq!(buffer[(6, detail)].fg, overlay0);
+    assert_eq!(buffer[(5, detail)].fg, overlay0);
 
     // The cursor alone lifts it back without focus.
     state.navigate_workspace_id = state.navigation_target(&ClientEndpointId::Local, "ws_2");
     let frame = state.compose(100, 16).expect("selected agent");
     let buffer = frame.to_ratatui_buffer().expect("buffer");
-    assert_eq!(buffer[(6, detail)].fg, subtext0);
-    assert!(!buffer[(6, detail)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buffer[(5, detail)].fg, subtext0);
+    assert!(!buffer[(5, detail)].modifier.contains(Modifier::BOLD));
 }
 
 #[test]
@@ -496,7 +496,7 @@ fn tab_focus_alone_keeps_sibling_summary_tertiary() {
         .iter()
         .position(|row| row.contains("reviewing auth"))
         .expect("detail row") as u16;
-    assert_eq!(buffer[(6, detail)].fg, palette.overlay0);
+    assert_eq!(buffer[(5, detail)].fg, palette.overlay0);
 }
 
 #[test]
@@ -512,13 +512,13 @@ fn idle_agent_rows_sink_to_tertiary() {
         .iter()
         .position(|row| row.contains("herdr / pi"))
         .expect("pane row") as u16;
-    assert_eq!(buffer[(6, pane)].fg, palette.overlay0);
+    assert_eq!(buffer[(5, pane)].fg, palette.overlay0);
     assert!(
-        !buffer[(6, pane)].modifier.contains(Modifier::DIM),
+        !buffer[(5, pane)].modifier.contains(Modifier::DIM),
         "idle title stays tertiary without dimming"
     );
     assert_eq!(
-        buffer[(4, pane)].fg,
+        buffer[(3, pane)].fg,
         palette.overlay0,
         "idle glyph stays tertiary with its title"
     );
@@ -562,17 +562,17 @@ fn signal_statuses_paint_title_and_glyph_with_the_signal_hue() {
                 .position(|row| row.contains("herdr / pi"))
                 .expect("pane row") as u16;
             assert_eq!(
-                buffer[(6, pane)].fg,
+                buffer[(5, pane)].fg,
                 expected,
                 "{status:?} title (focus follows: {focus})"
             );
             assert_eq!(
-                buffer[(4, pane)].fg,
+                buffer[(3, pane)].fg,
                 expected,
                 "{status:?} glyph (focus follows: {focus})"
             );
             assert!(
-                !buffer[(6, pane)].modifier.contains(Modifier::BOLD),
+                !buffer[(5, pane)].modifier.contains(Modifier::BOLD),
                 "{status:?} unfocused title is not bold"
             );
         }
@@ -605,12 +605,12 @@ fn signal_statuses_paint_title_and_glyph_with_the_signal_hue() {
             .position(|row| row.contains("herdr / pi"))
             .expect("pane row") as u16;
         assert_eq!(
-            buffer[(6, pane)].fg,
+            buffer[(5, pane)].fg,
             palette.green,
             "done title (focus follows: {focus})"
         );
         assert_eq!(
-            buffer[(4, pane)].fg,
+            buffer[(3, pane)].fg,
             palette.green,
             "done glyph (focus follows: {focus})"
         );
@@ -732,8 +732,8 @@ fn parked_workspace_collapses_to_a_single_count_row() {
             "",
             " repo                ▾2",
             " main",
-            " ├─ $ shell",
-            " │  $ shell",
+            " │ $ shell",
+            " │ $ shell",
             "",
             " ws_2                ▸1",
             "",
@@ -1217,7 +1217,7 @@ fn machine_sidebar_lists_pane_rows_under_each_machine() {
         ],
     );
     for (rect, _, _) in &hits {
-        assert_eq!(rows[rect.y as usize], "   ├─ $ shell", "{rows:?}");
+        assert_eq!(rows[rect.y as usize], "   │ $ shell", "{rows:?}");
     }
     assert_eq!(state.hits.sidebar_section_divider, Rect::default());
     assert_eq!(state.hits.sidebar_toggle.x, 24);
@@ -1335,9 +1335,9 @@ fn panes_branch_within_a_tab_and_group_by_tab_bar_order() {
 }
 
 #[test]
-fn lone_tab_skips_its_header_and_hangs_first_pane_off_the_tee() {
-    // One tab: name, branch, then the pane rows directly, with the
-    // first pane hanging off the tee so the tree keeps its junction.
+fn lone_tab_skips_its_header_and_runs_straight_down_the_spine() {
+    // One tab: name, branch, then the pane rows directly, running
+    // straight down the spine with no branch.
     let mut state = panes_state(&panes_config(), two_workspace_snapshot());
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
@@ -1346,8 +1346,8 @@ fn lone_tab_skips_its_header_and_hangs_first_pane_off_the_tee() {
         [
             " repo                ▾2",
             " main",
-            " ├─ $ shell",
-            " │  $ shell",
+            " │ $ shell",
+            " │ $ shell",
         ],
         "{rows:?}"
     );
@@ -1576,7 +1576,7 @@ fn pane_row_text(config: &Config) -> String {
 
 #[test]
 fn default_agent_layout_shows_label_then_harness() {
-    assert_eq!(pane_row_text(&panes_config()), " ├─ ⠋ herdr / pi");
+    assert_eq!(pane_row_text(&panes_config()), " │ ⠋ herdr / pi");
 }
 
 #[test]
@@ -1589,8 +1589,8 @@ fn default_agent_layout_puts_reported_summary_on_its_own_row() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], " ├─ ⠋ herdr / pi");
-    assert_eq!(rows[rect.y as usize + 1], " │    auth");
+    assert_eq!(rows[rect.y as usize], " │ ⠋ herdr / pi");
+    assert_eq!(rows[rect.y as usize + 1], " │   auth");
 }
 
 #[test]
@@ -1605,7 +1605,7 @@ fn harness_label_wins_over_slug_agent_name() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], " ├─ ⠋ herdr / claude");
+    assert_eq!(rows[rect.y as usize], " │ ⠋ herdr / claude");
 }
 
 #[test]
@@ -1618,8 +1618,8 @@ fn missing_summary_falls_back_to_terminal_title() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], " ├─ ⠋ herdr / pi");
-    assert_eq!(rows[rect.y as usize + 1], " │    CON-4665 explain…");
+    assert_eq!(rows[rect.y as usize], " │ ⠋ herdr / pi");
+    assert_eq!(rows[rect.y as usize + 1], " │   CON-4665 explain …");
 }
 
 #[test]
@@ -1633,7 +1633,7 @@ fn reported_summary_wins_over_terminal_title() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize + 1], " │    auth");
+    assert_eq!(rows[rect.y as usize + 1], " │   auth");
 }
 
 #[test]
@@ -1644,7 +1644,7 @@ fn agent_row_without_summary_reserves_a_blank_second_row() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], " ├─ ⠋ herdr / pi");
+    assert_eq!(rows[rect.y as usize], " │ ⠋ herdr / pi");
     assert_eq!(rows[rect.y as usize + 1], " │");
     assert_eq!(state.hits.workspace_panes.len(), 2);
     assert!(
@@ -1809,8 +1809,8 @@ fn shell_row_text(label: Option<&str>) -> String {
 
 #[test]
 fn shell_pane_shows_callsign_then_shell_without_prefix() {
-    assert_eq!(shell_row_text(Some("neon")), " ├─ $ neon");
-    assert_eq!(shell_row_text(None), " ├─ $ shell");
+    assert_eq!(shell_row_text(Some("neon")), " │ $ neon");
+    assert_eq!(shell_row_text(None), " │ $ shell");
 }
 
 #[test]
@@ -1826,7 +1826,7 @@ fn custom_agent_layout_flattens_and_drops_tokens_the_layout_shows() {
         ],
         vec![AgentSidebarToken::StateText],
     ];
-    assert_eq!(pane_row_text(&config), " ├─ ⠋ pi / working");
+    assert_eq!(pane_row_text(&config), " │ ⠋ pi / working");
 }
 
 #[test]
@@ -1840,7 +1840,7 @@ fn custom_agent_layout_without_summary_reserves_no_second_row() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], " ├─ ⠋ pi / herdr");
+    assert_eq!(rows[rect.y as usize], " │ ⠋ pi / herdr");
     assert_eq!(state.hits.workspace_panes.len(), 2);
     assert_eq!(state.hits.workspace_panes[1].0.y, rect.y + 1);
 }
@@ -1849,7 +1849,7 @@ fn custom_agent_layout_without_summary_reserves_no_second_row() {
 fn custom_agent_layout_that_resolves_empty_falls_back_to_agent_and_title() {
     let mut config = panes_config();
     config.ui.sidebar.agents.rows = vec![vec![AgentSidebarToken::Machine]];
-    assert_eq!(pane_row_text(&config), " ├─ ⠋ pi / herdr");
+    assert_eq!(pane_row_text(&config), " │ ⠋ pi / herdr");
 }
 
 #[test]
@@ -1904,10 +1904,10 @@ fn pane_rows_under_worktree_children_indent_with_spaces() {
         [
             "       repo          ▾1",
             "       worktree/ws_2",
-            "       ├─ $ shell",
+            "       │ $ shell",
             "       repo          ▾1",
             "       worktree/ws_3",
-            "       ├─ $ shell",
+            "       │ $ shell",
         ],
         "children hug the parent with no gap: {rows:?}"
     );
@@ -1989,7 +1989,7 @@ fn working_row_right_aligns_elapsed_on_first_row_only() {
     let (rect, _, _) = state.hits.workspace_panes[0];
     let first = &rows[rect.y as usize];
     assert!(
-        first.starts_with(" ├─ ⠋ herdr / pi"),
+        first.starts_with(" │ ⠋ herdr / pi"),
         "label keeps its full text: {first:?}"
     );
     assert!(first.ends_with("12m"), "elapsed right aligned: {first:?}");

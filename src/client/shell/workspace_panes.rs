@@ -158,8 +158,8 @@ impl<'a> WorkspacePanes<'a> {
     }
 
     /// Workspaces with two or more tabs show one header row per tab; a
-    /// lone tab skips its header and hangs its first pane off the tee,
-    /// so the block reads workspace name, branch, then panes. Height
+    /// lone tab skips its header and runs its panes straight down the
+    /// spine, pulled one cell left into the freed branch column. Height
     /// counts one row per pane (plus reserved detail rows) and one
     /// header row per tab group, zero for a lone tab.
     pub(super) fn display_height(&self, workspace_id: &str) -> usize {
@@ -1067,12 +1067,12 @@ fn pane_token_spans(
 /// Draws tab headers and pane rows top-down in `rect`, recording one click
 /// target per visible pane row. Workspaces with two or more tabs show one
 /// header per tab with an `├─` tee, so the block reads workspace name,
-/// branch, then one tree per tab. A lone tab skips its header; its first
-/// pane hangs off the tee instead. Pane
-/// rows sit one column under their tab, with summaries under their pane.
-/// One continuous pipe runs past the tabs: every pane and summary row not
-/// on a tee carries the straight spine, in every tab of every workspace, so the
-/// column never breaks between states. The spine stays solid from the top
+/// branch, then one tree per tab. A lone tab skips its header; its panes
+/// run straight down the spine instead, pulled one cell left into the
+/// freed branch column. With tabs, pane rows sit one column under their
+/// tab; summaries sit under their pane. One continuous pipe runs past the
+/// tabs: every pane and summary row carries the straight spine, in every
+/// tab of every workspace, so the column never breaks between states. The spine stays solid from the top
 /// through the selected tab and fades past it; only the selected tab's
 /// `─` branch goes bold. The selection otherwise reads through title
 /// color and weight alone, never a branch. Unfocused tabs fade their
@@ -1111,10 +1111,11 @@ fn render_pane_rows(
     let show_tabs = sections.len() > 1;
     // Tabs align with the workspace header; pane content sits one column
     // under its tab, with the spine at the tab column and summaries
-    // under their pane.
+    // under their pane. A lone tab has no headers, so its rows pull one
+    // cell left into the freed branch column.
     let base_x = rect.x.saturating_add(if entry.indented { 7 } else { 1 });
     let tab_x = base_x;
-    let content_x = tab_x.saturating_add(3);
+    let content_x = tab_x.saturating_add(if show_tabs { 3 } else { 2 });
     let mut y = rect.y;
     // Solidity follows the selection: every section up to and including
     // the focused pane's own stays lit, the rest fade. Presence never
@@ -1169,18 +1170,13 @@ fn render_pane_rows(
             );
             y = y.saturating_add(1);
         }
-        for (row_index, pane_row) in section.rows.iter().enumerate() {
+        for pane_row in section.rows.iter() {
             if y >= rect.bottom() {
                 return;
             }
-            if !show_tabs && row_index == 0 {
-                let dash_x = put_segment(buffer, base_x, y, right, "├", spine_style);
-                put_segment(buffer, dash_x, y, right, "─", tab_style);
-            } else {
-                // The spine runs straight through every pane row in every
-                // tab; presence never depends on focus, only its color does.
-                put_segment(buffer, base_x, y, right, "│", spine_style);
-            }
+            // The spine runs straight through every pane row in every
+            // tab; presence never depends on focus, only its color does.
+            put_segment(buffer, base_x, y, right, "│", spine_style);
             // Agent rows keep their hue in every tab, selected or not:
             // working peach, blocked red, done green, with bold alone
             // marking focus. Idle stays tertiary unless focused, when it
