@@ -157,10 +157,11 @@ impl<'a> WorkspacePanes<'a> {
             .map_or(&[], Vec::as_slice)
     }
 
-    /// Every tab shows its header row, lone tabs included, so the block
-    /// always reads workspace name, branch, then one tree per tab.
-    /// Height counts one row per pane (plus reserved detail rows) and
-    /// one header row per tab group.
+    /// Workspaces with two or more tabs show one header row per tab; a
+    /// lone tab skips its header and hangs its first pane off the tee,
+    /// so the block reads workspace name, branch, then panes. Height
+    /// counts one row per pane (plus reserved detail rows) and one
+    /// header row per tab group, zero for a lone tab.
     pub(super) fn display_height(&self, workspace_id: &str) -> usize {
         sections_height(self.sections(workspace_id))
     }
@@ -172,6 +173,7 @@ impl<'a> WorkspacePanes<'a> {
 }
 
 fn sections_height(sections: &[WorkspacePaneSection<'_>]) -> usize {
+    let show_tabs = sections.len() > 1;
     sections
         .iter()
         .map(|section| {
@@ -180,7 +182,7 @@ fn sections_height(sections: &[WorkspacePaneSection<'_>]) -> usize {
                 .iter()
                 .map(WorkspacePaneRow::display_height)
                 .sum::<usize>()
-                + 1
+                + usize::from(show_tabs)
         })
         .sum()
 }
@@ -1063,12 +1065,13 @@ fn pane_token_spans(
 }
 
 /// Draws tab headers and pane rows top-down in `rect`, recording one click
-/// target per visible pane row. Every tab shows its header with an `├─`
-/// tee, so the block always reads workspace name, branch, then one tree
-/// per tab. Pane
+/// target per visible pane row. Workspaces with two or more tabs show one
+/// header per tab with an `├─` tee, so the block reads workspace name,
+/// branch, then one tree per tab. A lone tab skips its header; its first
+/// pane hangs off the tee instead. Pane
 /// rows sit one column under their tab, with summaries under their pane.
-/// One continuous pipe runs past the tabs: every pane and summary row
-/// carries the straight spine, in every tab of every workspace, so the
+/// One continuous pipe runs past the tabs: every pane and summary row not
+/// on a tee carries the straight spine, in every tab of every workspace, so the
 /// column never breaks between states. The spine stays solid from the top
 /// through the selected tab and fades past it; only the selected tab's
 /// `─` branch goes bold. The selection otherwise reads through title
@@ -1105,6 +1108,7 @@ fn render_pane_rows(
     let record_hits = upstream::mouse_capture(config);
     let right = rect.right().saturating_sub(2);
     let now = now_ms();
+    let show_tabs = sections.len() > 1;
     // Tabs align with the workspace header; pane content sits one column
     // under its tab, with the spine at the tab column and summaries
     // under their pane.
@@ -1153,23 +1157,30 @@ fn render_pane_rows(
         } else {
             faded
         };
-        let branch_x = put_segment(buffer, tab_x, y, right, "├", spine_style);
-        put_text(
-            buffer,
-            branch_x,
-            y,
-            right.saturating_sub(branch_x),
-            &format!("─ {}", section.tab_label),
-            tab_style,
-        );
-        y = y.saturating_add(1);
-        for pane_row in section.rows.iter() {
+        if show_tabs {
+            let branch_x = put_segment(buffer, tab_x, y, right, "├", spine_style);
+            put_text(
+                buffer,
+                branch_x,
+                y,
+                right.saturating_sub(branch_x),
+                &format!("─ {}", section.tab_label),
+                tab_style,
+            );
+            y = y.saturating_add(1);
+        }
+        for (row_index, pane_row) in section.rows.iter().enumerate() {
             if y >= rect.bottom() {
                 return;
             }
-            // The spine runs straight through every pane row in every
-            // tab; presence never depends on focus, only its color does.
-            put_segment(buffer, base_x, y, right, "│", spine_style);
+            if !show_tabs && row_index == 0 {
+                let dash_x = put_segment(buffer, base_x, y, right, "├", spine_style);
+                put_segment(buffer, dash_x, y, right, "─", tab_style);
+            } else {
+                // The spine runs straight through every pane row in every
+                // tab; presence never depends on focus, only its color does.
+                put_segment(buffer, base_x, y, right, "│", spine_style);
+            }
             // Agent rows keep their hue in every tab, selected or not:
             // working peach, blocked red, done green, with bold alone
             // marking focus. Idle stays tertiary unless focused, when it
