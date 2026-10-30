@@ -791,8 +791,8 @@ impl<'a> Active<'a> {
             summary_lift: selected,
         };
         render_pane_rows(buffer, rows_area, sections, target, self.config, hits);
-        let y = start_y.saturating_add(sections_height(sections) as u16);
         if let Some(details) = rows.get(1) {
+            let y = start_y.saturating_add(sections_height(sections) as u16);
             if y < rect.bottom() {
                 render_footer(
                     buffer,
@@ -801,12 +801,6 @@ impl<'a> Active<'a> {
                     details,
                     palette,
                 );
-            }
-        } else if y > start_y && y <= rect.bottom() {
-            // Without a branch footer the spine curls on the last pane row.
-            let spine_x = text_area(rect, &entry).x;
-            if let Some(cell) = buffer.cell_mut((spine_x, y - 1)) {
-                cell.set_symbol(SPINE_END);
             }
         }
     }
@@ -827,7 +821,7 @@ struct PaneRowsTarget<'t> {
 
 /// Gap between a renamed workspace's label and its trailing repo.
 const LABEL_REPO_GAP: &str = "  ";
-const SPINE_END: &str = "╰";
+const BRANCH_MARK: &str = "›";
 
 /// Renamed header rows carry `[Branch(repo), Workspace(label)]`. Anything
 /// else renders through the generic token spans.
@@ -939,7 +933,7 @@ fn render_header(
     Paragraph::new(Line::from(spans)).render(area, buffer);
 }
 
-/// Branch under a workspace's last pane row, where the spine curls into it,
+/// Branch under a workspace's last pane row, marked in the spine column,
 /// with ahead/behind at the right edge in the elapsed column. Quieter than
 /// the panes above it so the block ends softly.
 fn render_footer(
@@ -953,14 +947,14 @@ fn render_footer(
     if area.is_empty() {
         return;
     }
-    let spine_style = area
-        .y
-        .checked_sub(1)
-        .and_then(|y| buffer.cell((area.x, y)))
-        .map_or(Style::default().fg(palette.overlay0), |cell| {
-            Style::default().fg(cell.fg)
-        });
-    put_segment(buffer, area.x, area.y, area.right(), SPINE_END, spine_style);
+    put_segment(
+        buffer,
+        area.x,
+        area.y,
+        area.right(),
+        BRANCH_MARK,
+        Style::default().fg(palette.overlay0),
+    );
     let quiet = Style::default().fg(palette.overlay1);
     let spans = |tokens: &[Token], width: u16| {
         upstream::token_spans(

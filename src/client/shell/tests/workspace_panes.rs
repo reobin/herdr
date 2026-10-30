@@ -204,11 +204,11 @@ fn panes_layout_renders_headers_gap_indent_and_pane_text_at_fixed_geometry() {
             " repo",
             " │ · shell",
             " │ · shell",
-            " ╰ main",
+            " › main",
             "",
             " ws_2",
             " │ ⠋ herdr pi",
-            " ╰",
+            " │",
             "",
             "",
             "",
@@ -342,10 +342,10 @@ fn navigate_selection_marks_type_with_a_block_fill() {
     );
     // Branch footers render quiet in every state, a step down from the
     // pane rows above them.
-    let branch = row_of(" ╰ con-4403-auth");
+    let branch = row_of(" › con-4403-auth");
     assert_eq!(buffer[(3, branch)].fg, palette.overlay1);
     assert!(!buffer[(3, branch)].modifier.contains(Modifier::BOLD));
-    let main = row_of(" ╰ main");
+    let main = row_of(" › main");
     assert_eq!(
         buffer[(3, main)].fg,
         palette.overlay1,
@@ -794,7 +794,7 @@ fn parked_workspace_collapses_to_a_single_row() {
             " repo",
             " │ · shell",
             " │ · shell",
-            " ╰ main",
+            " › main",
             "",
             " ws_2",
             "",
@@ -1373,7 +1373,7 @@ fn lone_tab_skips_its_header_and_runs_straight_down_the_spine() {
     let rows = sidebar_rows(&frame);
     assert_eq!(
         rows[2..6],
-        [" repo", " │ · shell", " │ · shell", " ╰ main",],
+        [" repo", " │ · shell", " │ · shell", " › main",],
         "{rows:?}"
     );
     assert_eq!(
@@ -1620,7 +1620,7 @@ fn navigate_cursor_on_the_focused_workspace_hides_the_focus_band() {
 }
 
 #[test]
-fn branch_footer_curls_off_the_spine_with_ahead_behind_at_the_edge() {
+fn branch_footer_marks_the_branch_with_ahead_behind_at_the_edge() {
     let mut snapshot = two_workspace_snapshot();
     snapshot.workspaces[0].git_ahead_behind = Some((2, 1));
     let mut state = panes_state(&panes_config(), snapshot);
@@ -1628,7 +1628,7 @@ fn branch_footer_curls_off_the_spine_with_ahead_behind_at_the_edge() {
     let rows = sidebar_rows(&frame);
     let footer = rows
         .iter()
-        .find(|row| row.starts_with(" ╰ main"))
+        .find(|row| row.starts_with(" › main"))
         .unwrap_or_else(|| panic!("footer row: {rows:?}"));
     // Ahead/behind ends in the elapsed column, where tab rules end too.
     assert!(footer.ends_with(" ↑2 ↓1"), "footer: {footer:?}");
@@ -1753,7 +1753,7 @@ fn tab_headers_rule_every_tab_name_to_the_edge() {
             " │ · shell",
             " │ servers ────────────",
             " │ · shell",
-            " ╰ main",
+            " › main",
         ],
         "{rows:?}"
     );
@@ -1774,6 +1774,8 @@ fn tab_headers_rule_every_tab_name_to_the_edge() {
         " ",
         "pane rows take no horizontals"
     );
+    // The branch marker stays quiet whatever the spine above it does.
+    assert_eq!(buffer[(1, 9)].fg, palette.overlay0, "branch marker");
     assert_eq!(
         buffer[(2, 5)].symbol(),
         " ",
@@ -1833,7 +1835,7 @@ fn second_tab_selection_keeps_pipe_filled_above_it() {
             " │ · shell",
             " │ servers ────────────",
             " │ · shell",
-            " ╰ main",
+            " › main",
         ],
         "{rows:?}"
     );
@@ -1973,10 +1975,10 @@ fn pane_rows_under_worktree_children_indent_with_spaces() {
         [
             "       repo",
             "       │ · shell",
-            "       ╰ worktree/ws_2",
+            "       › worktree/ws_2",
             "       repo",
             "       │ · shell",
-            "       ╰ worktree/ws_3",
+            "       › worktree/ws_3",
         ],
         "children hug the parent with no gap: {rows:?}"
     );
