@@ -890,7 +890,7 @@ struct PaneRowsTarget<'t> {
 
 /// Gap between a renamed workspace's label and its trailing repo.
 const LABEL_REPO_GAP: &str = "  ";
-const BRANCH_MARK: &str = "›";
+const BRANCH_MARK: &str = "◇";
 
 /// Renamed header rows carry `[Branch(repo), Workspace(label)]`. Anything
 /// else renders through the generic token spans.
@@ -962,11 +962,12 @@ fn truncate_text(text: &str, max_width: usize) -> String {
     format!("{output}…")
 }
 
-/// Header and footer text area of one block row. The text sits one cell in;
-/// worktree children indent by the same offset, with spaces.
+/// Header and footer text area of one block row. The text sits at the
+/// sidebar edge, one cell clear of the divider; worktree children indent
+/// with spaces.
 fn text_area(area: Rect, entry: &Entry) -> Rect {
-    let x = area.x.saturating_add(if entry.indented { 7 } else { 1 });
-    let width = area.right().saturating_sub(2).saturating_sub(x);
+    let x = area.x.saturating_add(if entry.indented { 6 } else { 0 });
+    let width = area.right().saturating_sub(1).saturating_sub(x);
     Rect::new(x, area.y, width, area.height.min(1))
 }
 
@@ -1131,12 +1132,12 @@ fn render_pane_rows(
         }
     };
     let record_hits = upstream::mouse_capture(config);
-    let right = rect.right().saturating_sub(2);
+    let right = rect.right().saturating_sub(1);
     let now = now_ms();
     let show_tabs = sections.len() > 1;
     // The spine sits under the workspace name; tab names and pane glyphs
     // share the column past it, with summaries under their pane.
-    let base_x = rect.x.saturating_add(if entry.indented { 7 } else { 1 });
+    let base_x = rect.x.saturating_add(if entry.indented { 6 } else { 0 });
     let content_x = base_x.saturating_add(2);
     let mut y = rect.y;
     // Solidity follows the selection: every section up to and including
