@@ -37,32 +37,29 @@ pub(super) fn mouse_capture(config: &ClientShellConfig) -> bool {
     config.mouse_capture
 }
 
-/// Unified status glyphs: every state has its own shape (working spins,
-/// blocked is a diamond, done a check, idle a dotted ring, unknown a middle dot).
+/// Unified status glyphs: working spins an arc, blocked and done are a filled
+/// dot told apart by color, idle a hollow ring, and shells a middle dot.
 /// Classic layout keeps its own dots/symbols mapping untouched; this
 /// override only drives unified pane rows through the call below.
 ///
-/// The working glyph animates through braille frames driven by the render
+/// The working glyph animates through arc frames driven by the render
 /// clock. The client loop already wakes roughly every 100ms, so the
 /// spinner advances without extra timer plumbing.
 pub(super) fn status_icon(status: AgentStatus, _config: &ClientShellConfig) -> &'static str {
     match status {
         AgentStatus::Working => working_spinner_frame(std::time::Instant::now()),
-        AgentStatus::Blocked => "◆",
-        AgentStatus::Done => "✓",
-        AgentStatus::Idle => "◌",
+        AgentStatus::Blocked | AgentStatus::Done => "●",
+        AgentStatus::Idle => "○",
         AgentStatus::Unknown => "·",
     }
 }
 
-/// Braille spinner frames for the working glyph, sampled in order. Busy and
-/// unmistakable at a glance; the tradeoff is vertical metrics: braille cells
-/// render full-height next to the centered idle ring, so state switches can
-/// visibly shift the glyph by a pixel or two.
-const WORKING_SPINNER_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+/// Arc spinner frames for the working glyph, sampled in order. Arcs share the
+/// ring and dot metrics, so state switches never shift the glyph.
+const WORKING_SPINNER_FRAMES: [&str; 4] = ["◜", "◝", "◞", "◟"];
 
 /// One frame per client tick keeps the cadence even: the loop wakes roughly
-/// every 100ms, so each repaint advances exactly one frame for a 1.0s cycle.
+/// every 100ms, so each repaint advances exactly one frame.
 /// An off-multiple interval (e.g. 120ms) aliases into stalls and skips.
 const SPINNER_FRAME_MS: u128 = 100;
 
@@ -713,16 +710,16 @@ mod tests {
     }
 
     #[test]
-    fn settled_statuses_have_distinct_static_glyphs() {
+    fn settled_statuses_have_static_glyphs() {
         let config = config();
-        assert_eq!(status_icon(AgentStatus::Blocked, &config), "\u{25c6}");
-        assert_eq!(status_icon(AgentStatus::Done, &config), "\u{2713}");
-        assert_eq!(status_icon(AgentStatus::Idle, &config), "\u{25cc}");
+        assert_eq!(status_icon(AgentStatus::Blocked, &config), "\u{25cf}");
+        assert_eq!(status_icon(AgentStatus::Done, &config), "\u{25cf}");
+        assert_eq!(status_icon(AgentStatus::Idle, &config), "\u{25cb}");
         assert_eq!(status_icon(AgentStatus::Unknown, &config), "\u{b7}");
     }
 
     #[test]
-    fn working_glyph_spins_through_braille_frames() {
+    fn working_glyph_spins_through_arc_frames() {
         let config = config();
         assert!(WORKING_SPINNER_FRAMES.contains(&status_icon(AgentStatus::Working, &config)));
         let start = spinner_epoch();

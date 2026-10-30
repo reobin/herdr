@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Paragraph, Widget},
 };
@@ -71,7 +71,7 @@ pub(super) struct WorkspacePaneRow<'a> {
     /// never reported it.
     pub(super) status_since_ms: Option<u64>,
     /// Agent text flattened to one line. Empty for shell panes and for
-    /// layouts that resolve to nothing, which fall back to `kind / label`.
+    /// layouts that resolve to nothing, which fall back to `label kind`.
     pub(super) tokens: Vec<Token>,
     /// Reserved summary line for agent panes whose layout has a `$summary`.
     /// `Some` even without a reported summary, so rows never shift when one
@@ -159,9 +159,8 @@ impl<'a> WorkspacePanes<'a> {
 
     /// Workspaces with two or more tabs show one header row per tab; a
     /// lone tab skips its header and runs its panes straight down the
-    /// spine, pulled one cell left into the freed branch column. Height
-    /// counts one row per pane (plus reserved detail rows) and one
-    /// header row per tab group, zero for a lone tab.
+    /// spine. Height counts one row per pane (plus reserved detail rows)
+    /// and one header row per tab group, zero for a lone tab.
     pub(super) fn display_height(&self, workspace_id: &str) -> usize {
         sections_height(self.sections(workspace_id))
     }
@@ -244,13 +243,14 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// Workspace header rows: the repo name (plus ` / label` when renamed),
+/// Workspace rows: the name row (the repo, or `label  repo` when renamed),
 /// then branch and ahead/behind when known, for every workspace including
-/// linked worktree children. The renamed first row carries two tokens so
-/// both sides render primary with a quiet slash divider.
-/// Workspace header: the repo context resolves from the workspace's first
-/// pane cwd, so the name tracks the identity source instead of following
-/// focus. Falls back to `new_workspace_cwd` without a snapshot.
+/// linked worktree children. The name row heads the block and the branch
+/// row closes it as a footer under the panes. The renamed name row carries
+/// two tokens so the label and repo can take their own styles. The repo
+/// context resolves from the workspace's first pane cwd, so the name tracks
+/// the identity source instead of following focus. Falls back to
+/// `new_workspace_cwd` without a snapshot.
 pub(super) fn header_rows(
     snapshot: Option<&ClientShellSnapshot>,
     workspace: &ClientShellWorkspace,
@@ -285,7 +285,7 @@ pub(super) fn header_rows(
 }
 
 /// Split header name into its repo context and display name. Renamed
-/// workspaces show both (`repo / label`); everything else shows one name:
+/// workspaces show both (`label  repo`); everything else shows one name:
 /// the worktree repo, the local git repo resolving through linked
 /// checkouts, the directory name outside repos, or the label with no repo.
 /// The repo leads so sibling worktrees of one repo share one context even
@@ -749,56 +749,31 @@ impl<'a> Active<'a> {
         );
         let palette = upstream::palette(self.config);
         let sections = self.sections(block.machine, facts.workspace_id);
-        // The title carries the hottest pane status: tertiary while the
-        // workspace rests, signal-colored while anything needs attention.
-        let worst = self.hottest_status(block.machine, facts.workspace_id);
+        let parked = self.parked(block.machine, facts.workspace_id);
         let emphasized = (show_focus && facts.focused) || selected || dragged;
         let bold = if emphasized {
             Modifier::BOLD
         } else {
             Modifier::empty()
         };
-        // The name carries the hottest pane status while anything needs
-        // attention; a resting workspace reads primary instead of sinking
-        // to tertiary with every other row.
+        // Pane rows carry status, so the name stays primary while they show.
+        // A parked workspace hides them, so its name takes the hottest one.
+        let worst = self.hottest_status(block.machine, facts.workspace_id);
         let title = match worst {
-            AgentStatus::Working | AgentStatus::Blocked | AgentStatus::Done => {
+            AgentStatus::Working | AgentStatus::Blocked | AgentStatus::Done if parked => {
                 upstream::status_color(worst, palette)
             }
-            AgentStatus::Idle | AgentStatus::Unknown => palette.text,
+            _ => palette.text,
         };
         let title_style = Style::default().fg(title).add_modifier(bold);
-        if self.parked(block.machine, facts.workspace_id) {
-            // One row only: the name. Branch, tabs, and panes all give up
-            // their rows.
-            render_header(
-                buffer,
-                rect,
-                &entry,
-                &rows[..rows.len().min(1)],
-                show_focus && facts.focused,
-                selected,
-                dragged,
-                palette,
-                title_style,
-            );
+        render_header(buffer, rect, &entry, &rows[0], palette, title_style);
+        if parked {
             return;
         }
-        render_header(
-            buffer,
-            rect,
-            &entry,
-            &rows,
-            show_focus && facts.focused,
-            selected,
-            dragged,
-            palette,
-            title_style,
-        );
         let Some(endpoint_id) = self.machines.get(block.machine).map(|machine| machine.id) else {
             return;
         };
-        let start_y = rect.y.saturating_add(rows.len() as u16).min(rect.bottom());
+        let start_y = rect.y.saturating_add(1).min(rect.bottom());
         let rows_area = Rect::new(rect.x, start_y, rect.width, rect.bottom() - start_y);
         // Summaries lift for the navigate cursor; workspace or tab focus
         // alone never promotes another pane's summary.
@@ -806,9 +781,22 @@ impl<'a> Active<'a> {
             entry: &entry,
             endpoint_id,
             show_focus,
+            workspace_focused: facts.focused,
             summary_lift: selected,
         };
         render_pane_rows(buffer, rows_area, sections, target, self.config, hits);
+        if let Some(details) = rows.get(1) {
+            let y = start_y.saturating_add(sections_height(sections) as u16);
+            if y < rect.bottom() {
+                render_footer(
+                    buffer,
+                    Rect::new(rect.x, y, rect.width, 1),
+                    &entry,
+                    details,
+                    palette,
+                );
+            }
+        }
     }
 }
 
@@ -817,92 +805,64 @@ struct PaneRowsTarget<'t> {
     endpoint_id: &'t ClientEndpointId,
     /// False for machines other than the active one, which never show focus.
     show_focus: bool,
+    /// Only the focused workspace fills its focused pane's rows.
+    workspace_focused: bool,
     /// Whether the navigate cursor lifts summaries to secondary.
     /// Workspace or tab focus alone never does; only the focused pane's
     /// own summary steps up with it.
     summary_lift: bool,
 }
 
-/// Renamed header rows carry `[Branch(repo), Workspace(label)]` so both
-/// sides render in the title style with a quiet divider. Anything else
-/// renders through the generic token spans.
-fn is_slash_header(row: &[Token]) -> bool {
-    matches!(
-        row,
-        [first, second]
-            if matches!(first.kind, upstream::ResolvedTokenKind::Branch(_))
-                && matches!(second.kind, upstream::ResolvedTokenKind::Workspace(_))
-    )
-}
+/// Gap between a renamed workspace's label and its trailing repo.
+const LABEL_REPO_GAP: &str = "  ";
 
-/// First row of a renamed workspace: `repo / label` with both sides in
-/// the header style (primary, bold on focus or cursor) and a quiet
-/// tertiary divider.
-fn render_slash_header(
-    buffer: &mut Buffer,
-    x: u16,
-    y: u16,
-    width: usize,
-    row: &[Token],
-    workspace_style: Style,
-    secondary_style: Style,
-) {
-    let (repo, label) = match row {
+/// Renamed header rows carry `[Branch(repo), Workspace(label)]`. Anything
+/// else renders through the generic token spans.
+fn renamed_header(row: &[Token]) -> Option<(&str, &str)> {
+    match row {
         [first, second] => match (&first.kind, &second.kind) {
             (
                 upstream::ResolvedTokenKind::Branch(repo),
                 upstream::ResolvedTokenKind::Workspace(label),
-            ) => (repo.as_str(), label.as_str()),
-            _ => return,
+            ) => Some((repo.as_str(), label.as_str())),
+            _ => None,
         },
-        _ => return,
-    };
-    let separator = " / ";
-    let separator_width = slash_header_width(separator);
-    let repo_width = slash_header_width(repo);
-    let label_width = slash_header_width(label);
-    if width < 1 + separator_width + 1 {
-        let text = slash_header_truncate(label, width);
-        Paragraph::new(Line::from(vec![Span::styled(text, workspace_style)]))
-            .render(Rect::new(x, y, width as u16, 1), buffer);
-        return;
+        _ => None,
     }
-    let mut repo_budget = 1usize;
-    let mut label_budget = 1usize;
-    let mut remaining = width.saturating_sub(separator_width).saturating_sub(2);
-    while remaining > 0 {
-        let mut grew = false;
-        if repo_budget < repo_width {
-            repo_budget += 1;
-            remaining -= 1;
-            grew = true;
-        }
-        if remaining == 0 {
-            break;
-        }
-        if label_budget < label_width {
-            label_budget += 1;
-            remaining -= 1;
-            grew = true;
-        }
-        if !grew {
-            break;
-        }
-    }
-    let spans = vec![
-        Span::styled(slash_header_truncate(repo, repo_budget), workspace_style),
-        Span::styled(separator.to_owned(), secondary_style),
-        Span::styled(slash_header_truncate(label, label_budget), workspace_style),
-    ];
-    Paragraph::new(Line::from(spans)).render(Rect::new(x, y, width as u16, 1), buffer);
 }
 
-fn slash_header_width(text: &str) -> usize {
+/// Name row of a renamed workspace: the label in the title style, then the
+/// repo in tertiary. The label keeps its full width first; the repo
+/// truncates, and drops out when only a lone ellipsis would fit.
+fn render_label_header(
+    buffer: &mut Buffer,
+    area: Rect,
+    label: &str,
+    repo: &str,
+    title_style: Style,
+    repo_style: Style,
+) {
+    let width = usize::from(area.width);
+    let label_width = text_width(label);
+    let repo_budget = width.saturating_sub(label_width + text_width(LABEL_REPO_GAP));
+    let spans = if repo_budget < 2 {
+        vec![Span::styled(truncate_text(label, width), title_style)]
+    } else {
+        vec![
+            Span::styled(label.to_owned(), title_style),
+            Span::raw(LABEL_REPO_GAP),
+            Span::styled(truncate_text(repo, repo_budget), repo_style),
+        ]
+    };
+    Paragraph::new(Line::from(spans)).render(area, buffer);
+}
+
+fn text_width(text: &str) -> usize {
     use unicode_width::UnicodeWidthStr;
     UnicodeWidthStr::width(text)
 }
 
-fn slash_header_truncate(text: &str, max_width: usize) -> String {
+fn truncate_text(text: &str, max_width: usize) -> String {
     use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
     if UnicodeWidthStr::width(text) <= max_width {
         return text.to_owned();
@@ -926,92 +886,90 @@ fn slash_header_truncate(text: &str, max_width: usize) -> String {
     format!("{output}…")
 }
 
-/// Mirrors upstream's header text styling. The name sits one cell
-/// in so it lines up with the upstream `spaces` title. Worktree children
+/// Header and footer text area of one block row. The text sits one cell in
+/// so it lines up with the upstream `spaces` title; worktree children
 /// indent by the same offset, with spaces.
+fn text_area(area: Rect, entry: &Entry) -> Rect {
+    let x = area.x.saturating_add(if entry.indented { 7 } else { 1 });
+    let width = area.right().saturating_sub(2).saturating_sub(x);
+    Rect::new(x, area.y, width, area.height.min(1))
+}
+
+/// The workspace name row. The title style carries weight for focus and
+/// the navigate cursor, and color only for a parked workspace.
 fn render_header(
     buffer: &mut Buffer,
     area: Rect,
     entry: &Entry,
-    rows: &[Vec<Token>],
-    focused: bool,
-    selected: bool,
-    dragged: bool,
+    row: &[Token],
     palette: &Palette,
     title_style: Style,
 ) {
-    // The first row carries the hottest pane status; weight alone marks
-    // focus and the navigate cursor. Other rows keep their own styles:
-    // the branch line stays tertiary in every state.
-    let emphasized = focused || selected || dragged;
-    let workspace_style = Style::default()
-        .fg(palette.text)
-        .add_modifier(if emphasized {
-            Modifier::BOLD
-        } else {
-            Modifier::empty()
-        });
-    let secondary_style = Style::default().fg(palette.overlay0);
-    for (row_index, row) in rows.iter().enumerate() {
-        let y = area.y.saturating_add(row_index as u16);
-        if y >= area.bottom() {
-            break;
-        }
-        let x = area.x.saturating_add(if entry.indented { 7 } else { 1 });
-        let width = area.right().saturating_sub(2).saturating_sub(x);
-        if row_index == 0 && is_slash_header(row) {
-            render_slash_header(
-                buffer,
-                x,
-                y,
-                usize::from(width),
-                row,
-                title_style,
-                secondary_style,
-            );
-        } else {
-            // Branch rows render secondary, a step down from the title
-            // in every state; anything else on the row keeps its own
-            // style.
-            let branch_row = row
-                .iter()
-                .any(|token| matches!(token.kind, upstream::ResolvedTokenKind::Branch(_)));
-            let secondary = if branch_row {
-                Style::default().fg(palette.subtext0)
-            } else {
-                secondary_style
-            };
-            let spans = upstream::token_spans(
-                row,
-                Style::default(),
-                if row_index == 0 {
-                    title_style
-                } else {
-                    workspace_style
-                },
-                secondary,
-                Style::default().fg(palette.overlay1),
-                palette,
-                usize::from(width),
-            );
-            Paragraph::new(Line::from(spans)).render(Rect::new(x, y, width, 1), buffer);
-        }
+    let area = text_area(area, entry);
+    if area.is_empty() {
+        return;
     }
+    if let Some((repo, label)) = renamed_header(row) {
+        let repo_style = Style::default().fg(palette.overlay0);
+        render_label_header(buffer, area, label, repo, title_style, repo_style);
+        return;
+    }
+    let spans = upstream::token_spans(
+        row,
+        Style::default(),
+        title_style,
+        Style::default().fg(palette.overlay0),
+        Style::default().fg(palette.overlay1),
+        palette,
+        usize::from(area.width),
+    );
+    Paragraph::new(Line::from(spans)).render(area, buffer);
 }
 
-/// Agent pane rows join tokens with ` / ` where upstream uses ` · `,
-/// matching the workspace `repo / label` header. Shell rows carry no
-/// separator, so the swap only ever touches agent rows.
+/// Branch and ahead/behind under a workspace's last pane row, quieter than
+/// the panes above it so the block ends softly.
+fn render_footer(
+    buffer: &mut Buffer,
+    area: Rect,
+    entry: &Entry,
+    details: &[Token],
+    palette: &Palette,
+) {
+    let area = text_area(area, entry);
+    if area.is_empty() {
+        return;
+    }
+    let quiet = Style::default().fg(palette.overlay1);
+    let spans = upstream::token_spans(
+        details,
+        Style::default(),
+        quiet,
+        quiet,
+        quiet,
+        palette,
+        usize::from(area.width),
+    );
+    Paragraph::new(Line::from(spans)).render(area, buffer);
+}
+
+/// Agent pane rows read `sun claude`: upstream's ` · ` separators become a
+/// plain space, and everything after the pane name takes the quieter
+/// trailing style. Shell rows carry no separator, so this only ever
+/// touches agent rows.
 fn pane_token_spans(
     tokens: &[Token],
     status_style: Style,
     workspace_style: Style,
     secondary_style: Style,
     custom_style: Style,
-    separator_style: Option<Style>,
+    trailing_style: Style,
     palette: &Palette,
     max_width: usize,
 ) -> Vec<Span<'static>> {
+    // Upstream budgets each 3-cell ` · ` separator; the plain space below
+    // hands those 2 cells back to the tokens.
+    let reclaimed = 2 * tokens.len().saturating_sub(1);
+    let mut trailing = false;
     upstream::token_spans(
         tokens,
         status_style,
@@ -1019,12 +977,15 @@ fn pane_token_spans(
         secondary_style,
         custom_style,
         palette,
-        max_width,
+        max_width + reclaimed,
     )
     .into_iter()
     .map(|span| {
         if span.content == " · " {
-            Span::styled(" / ".to_owned(), separator_style.unwrap_or(span.style))
+            trailing = true;
+            Span::raw(" ")
+        } else if trailing {
+            Span::styled(span.content, trailing_style)
         } else {
             span
         }
@@ -1034,23 +995,17 @@ fn pane_token_spans(
 
 /// Draws tab headers and pane rows top-down in `rect`, recording one click
 /// target per visible pane row. Workspaces with two or more tabs show one
-/// header per tab with an `├─` tee, so the block reads workspace name,
-/// branch, then one tree per tab. A lone tab skips its header; its panes
-/// run straight down the spine instead, pulled one cell left into the
-/// freed branch column. With tabs, pane rows sit one column under their
-/// tab; summaries sit under their pane. One continuous pipe runs past the
-/// tabs: every pane and summary row carries the straight spine, in every
-/// tab of every workspace, so the column never breaks between states. The spine stays solid from the top
-/// through the selected tab and fades past it; only the selected tab's
-/// `─` branch goes bold. The selection otherwise reads through title
-/// color and weight alone, never a branch. Unfocused tabs fade their
-/// headers, shell rows, summaries and spine, but agent titles and glyphs
-/// keep their signal hue everywhere, losing only bold. The spine follows
-/// its tab: solid while the selection sits at or below it, quiet on
-/// background machines, faded past the selection. Unfocused tabs fade
-/// their headers, summaries, elapsed and spine to dim tertiary; shell
-/// rows sit tertiary undimmed, and agent rows keep their hue through
-/// the fade.
+/// header per tab, the tab name and a hairline rule to the edge; a lone tab
+/// skips its header. Tab names and pane glyphs share the column past the
+/// spine; summaries sit under the pane label. Every pane, summary and tab
+/// row carries the spine, in every tab of every workspace, so the column
+/// never breaks between states.
+/// The spine stays solid from the top through the selected tab and fades
+/// past it, quiet on background machines. The focused pane of the focused
+/// workspace sits on a filled band. Unfocused tabs fade their headers,
+/// summaries, elapsed and spine to dim tertiary; shell rows sit tertiary
+/// undimmed, and agent rows keep their hue through the fade, losing only
+/// bold.
 fn render_pane_rows(
     buffer: &mut Buffer,
     rect: Rect,
@@ -1063,6 +1018,7 @@ fn render_pane_rows(
         entry,
         endpoint_id,
         show_focus,
+        workspace_focused,
         summary_lift,
     } = target;
     let palette = upstream::palette(config);
@@ -1077,13 +1033,10 @@ fn render_pane_rows(
     let right = rect.right().saturating_sub(2);
     let now = now_ms();
     let show_tabs = sections.len() > 1;
-    // Tabs align with the workspace header; pane content sits one column
-    // under its tab, with the spine at the tab column and summaries
-    // under their pane. A lone tab has no headers, so its rows pull one
-    // cell left into the freed branch column.
+    // The spine sits under the workspace name; tab names and pane glyphs
+    // share the column past it, with summaries under their pane.
     let base_x = rect.x.saturating_add(if entry.indented { 7 } else { 1 });
-    let tab_x = base_x;
-    let content_x = tab_x.saturating_add(if show_tabs { 3 } else { 2 });
+    let content_x = base_x.saturating_add(2);
     let mut y = rect.y;
     // Solidity follows the selection: every section up to and including
     // the focused pane's own stays lit, the rest fade. Presence never
@@ -1096,19 +1049,15 @@ fn render_pane_rows(
         if y >= rect.bottom() {
             return;
         }
-        // Every tab header tees into the pipe: pane rows always continue
-        // below, so a closing corner would break the line. The `├` keeps
-        // the column connected from the first header to the last row.
         let active = section.tab_focused;
         let faded = Style::default()
             .fg(palette.overlay0)
             .add_modifier(Modifier::DIM);
-        // The selected tab's `─` branch alone goes bold; the cursor never
-        // lifts tabs, and unfocused ones fade to dim tertiary. The spine
-        // stays solid from the top through the selected tab and fades
-        // past it: lit while the machine shows focus, quiet otherwise,
-        // never bold either way. The `├` cell shares the spine style so
-        // the column reads as one line.
+        // The selected tab's name alone goes bold; the cursor never lifts
+        // tabs, and unfocused ones fade to dim tertiary. The spine stays
+        // solid from the top through the selected tab and fades past it:
+        // lit while the machine shows focus, quiet otherwise, never bold
+        // either way.
         let lit = show_focus && lit_at(position);
         let spine_style = if lit {
             Style::default().fg(palette.text)
@@ -1127,20 +1076,43 @@ fn render_pane_rows(
             faded
         };
         if show_tabs {
-            let branch_x = put_segment(buffer, tab_x, y, right, "├", spine_style);
-            put_text(
-                buffer,
-                branch_x,
-                y,
-                right.saturating_sub(branch_x),
-                &format!("─ {}", section.tab_label),
-                tab_style,
-            );
+            // The tab name, then a hairline rule to the edge.
+            put_segment(buffer, base_x, y, right, "│", spine_style);
+            let name_end = put_segment(buffer, content_x, y, right, section.tab_label, tab_style);
+            let rule_x = name_end.saturating_add(1);
+            if rule_x < right {
+                let rule = "─".repeat(usize::from(right - rule_x));
+                put_text(buffer, rule_x, y, right - rule_x, &rule, faded);
+            }
             y = y.saturating_add(1);
         }
         for pane_row in section.rows.iter() {
             if y >= rect.bottom() {
                 return;
+            }
+            // The focused pane of the focused workspace sits on a band over
+            // the focused block's own fill, summary included. The terminal
+            // theme leaves surface0 to the terminal, which would punch a
+            // hole in the fill, so it falls back to the selection color.
+            let band_bg = if palette.surface0 == Color::Reset {
+                palette.selection_bg
+            } else {
+                palette.surface0
+            };
+            if active
+                && pane_row.focused
+                && show_focus
+                && workspace_focused
+                && band_bg != Color::Reset
+            {
+                let rows = (pane_row.display_height() as u16).min(rect.bottom() - y);
+                let band = Rect::new(
+                    base_x,
+                    y,
+                    rect.right().saturating_sub(1).saturating_sub(base_x),
+                    rows,
+                );
+                buffer.set_style(band, Style::default().bg(band_bg));
             }
             // The spine runs straight through every pane row in every
             // tab; presence never depends on focus, only its color does.
@@ -1163,25 +1135,28 @@ fn render_pane_rows(
                     }
                 }
             };
-            // Signal glyphs keep their hue everywhere. Idle (`◌`) and
-            // shell (`$`) glyphs and separators follow the title.
+            // Signal glyphs keep their hue everywhere. Idle (`○`) and shell
+            // (`·`) glyphs follow the title.
             let quiet = matches!(pane_row.status, AgentStatus::Idle | AgentStatus::Unknown);
             let glyph_style = if quiet {
                 text_style
             } else {
                 Style::default().fg(upstream::status_color(pane_row.status, palette))
             };
-            let x = if pane_row.status == AgentStatus::Unknown {
-                put_segment(buffer, content_x, y, right, "$", glyph_style)
+            let x = put_segment(
+                buffer,
+                content_x,
+                y,
+                right,
+                upstream::status_icon(pane_row.status, config),
+                glyph_style,
+            );
+            // The agent kind trails the pane name a step quieter: lifted
+            // beside a signal or focused name, faded beside a resting one.
+            let kind_style = if active && (!quiet || (pane_row.focused && show_focus)) {
+                Style::default().fg(palette.overlay1)
             } else {
-                put_segment(
-                    buffer,
-                    content_x,
-                    y,
-                    right,
-                    upstream::status_icon(pane_row.status, config),
-                    glyph_style,
-                )
+                faded
             };
             // Agents hang their status elapsed off the right edge of the
             // first row only. The label truncates first; the slot gives up
@@ -1197,15 +1172,19 @@ fn render_pane_rows(
                 _ => (right, None),
             };
             if pane_row.tokens.is_empty() {
-                // A shell row's label is its callsign, so the kind prefix
-                // would only repeat what the `$` marker says. Agent
-                // rows that resolve to nothing keep `kind / label`.
-                let text = match (pane_row.label, pane_row.kind) {
-                    (Some(label), "shell") => format!(" {label}"),
-                    (Some(label), kind) => format!(" {kind} / {label}"),
-                    (None, kind) => format!(" {kind}"),
+                // A shell row's label is its callsign, so the kind would
+                // only repeat what the `·` marker says. Agent rows that
+                // resolve to nothing read `label kind`.
+                let spans = match (pane_row.label, pane_row.kind) {
+                    (Some(label), "shell") => vec![Span::styled(format!(" {label}"), text_style)],
+                    (Some(label), kind) => vec![
+                        Span::styled(format!(" {label}"), text_style),
+                        Span::styled(format!(" {kind}"), kind_style),
+                    ],
+                    (None, kind) => vec![Span::styled(format!(" {kind}"), text_style)],
                 };
-                put_text(buffer, x, y, label_end.saturating_sub(x), &text, text_style);
+                Paragraph::new(Line::from(spans))
+                    .render(Rect::new(x, y, label_end.saturating_sub(x), 1), buffer);
             } else {
                 let width = label_end.saturating_sub(x);
                 let mut spans = vec![Span::raw(" ")];
@@ -1215,7 +1194,7 @@ fn render_pane_rows(
                     text_style,
                     text_style,
                     text_style,
-                    quiet.then_some(text_style),
+                    kind_style,
                     palette,
                     usize::from(width.saturating_sub(1)),
                 ));
