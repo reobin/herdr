@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Paragraph, Widget},
 };
@@ -766,10 +766,16 @@ impl<'a> Active<'a> {
             _ => palette.text,
         };
         let title_style = Style::default().fg(title).add_modifier(bold);
-        render_header(buffer, rect, &entry, &rows[0], palette, title_style);
         if parked {
+            render_header(buffer, rect, &entry, &rows[0], palette, title_style);
             return;
         }
+        // The focused pane's band is the only focus fill, so the focused
+        // block drops upstream's own; the cursor and drag fills stay.
+        if facts.focused && !selected && !dragged {
+            buffer.set_style(rect, Style::default().bg(palette.sidebar_bg));
+        }
+        render_header(buffer, rect, &entry, &rows[0], palette, title_style);
         let Some(endpoint_id) = self.machines.get(block.machine).map(|machine| machine.id) else {
             return;
         };
@@ -785,8 +791,8 @@ impl<'a> Active<'a> {
             summary_lift: selected,
         };
         render_pane_rows(buffer, rows_area, sections, target, self.config, hits);
+        let y = start_y.saturating_add(sections_height(sections) as u16);
         if let Some(details) = rows.get(1) {
-            let y = start_y.saturating_add(sections_height(sections) as u16);
             if y < rect.bottom() {
                 render_footer(
                     buffer,
@@ -795,6 +801,12 @@ impl<'a> Active<'a> {
                     details,
                     palette,
                 );
+            }
+        } else if y > start_y && y <= rect.bottom() {
+            // Without a branch footer the spine curls on the last pane row.
+            let spine_x = text_area(rect, &entry).x;
+            if let Some(cell) = buffer.cell_mut((spine_x, y - 1)) {
+                cell.set_symbol(SPINE_END);
             }
         }
     }
@@ -815,6 +827,7 @@ struct PaneRowsTarget<'t> {
 
 /// Gap between a renamed workspace's label and its trailing repo.
 const LABEL_REPO_GAP: &str = "  ";
+const SPINE_END: &str = "╰";
 
 /// Renamed header rows carry `[Branch(repo), Workspace(label)]`. Anything
 /// else renders through the generic token spans.
@@ -926,7 +939,8 @@ fn render_header(
     Paragraph::new(Line::from(spans)).render(area, buffer);
 }
 
-/// Branch and ahead/behind under a workspace's last pane row, quieter than
+/// Branch under a workspace's last pane row, where the spine curls into it,
+/// with ahead/behind at the right edge in the elapsed column. Quieter than
 /// the panes above it so the block ends softly.
 fn render_footer(
     buffer: &mut Buffer,
@@ -939,17 +953,42 @@ fn render_footer(
     if area.is_empty() {
         return;
     }
+    let spine_style = area
+        .y
+        .checked_sub(1)
+        .and_then(|y| buffer.cell((area.x, y)))
+        .map_or(Style::default().fg(palette.overlay0), |cell| {
+            Style::default().fg(cell.fg)
+        });
+    put_segment(buffer, area.x, area.y, area.right(), SPINE_END, spine_style);
     let quiet = Style::default().fg(palette.overlay1);
-    let spans = upstream::token_spans(
-        details,
-        Style::default(),
-        quiet,
-        quiet,
-        quiet,
-        palette,
-        usize::from(area.width),
-    );
-    Paragraph::new(Line::from(spans)).render(area, buffer);
+    let spans = |tokens: &[Token], width: u16| {
+        upstream::token_spans(
+            tokens,
+            Style::default(),
+            quiet,
+            quiet,
+            quiet,
+            palette,
+            usize::from(width),
+        )
+    };
+    let (git_status, branch): (Vec<Token>, Vec<Token>) = details
+        .iter()
+        .cloned()
+        .partition(|token| matches!(token.kind, upstream::ResolvedTokenKind::GitStatus { .. }));
+    let branch_x = area.x.saturating_add(2);
+    let mut branch_end = area.right();
+    let status = Line::from(spans(&git_status, area.width));
+    let status_width = status.width() as u16;
+    if status_width > 0 && branch_x.saturating_add(status_width + 1) < area.right() {
+        let status_x = area.right() - status_width;
+        status.render(Rect::new(status_x, area.y, status_width, 1), buffer);
+        branch_end = status_x - 1;
+    }
+    let width = branch_end.saturating_sub(branch_x);
+    Paragraph::new(Line::from(spans(&branch, width)))
+        .render(Rect::new(branch_x, area.y, width, 1), buffer);
 }
 
 /// Agent pane rows read `sun claude`: upstream's ` · ` separators become a
@@ -1090,29 +1129,13 @@ fn render_pane_rows(
             if y >= rect.bottom() {
                 return;
             }
-            // The focused pane of the focused workspace sits on a band over
-            // the focused block's own fill, summary included. The terminal
-            // theme leaves surface0 to the terminal, which would punch a
-            // hole in the fill, so it falls back to the selection color.
-            let band_bg = if palette.surface0 == Color::Reset {
-                palette.selection_bg
-            } else {
-                palette.surface0
-            };
-            if active
-                && pane_row.focused
-                && show_focus
-                && workspace_focused
-                && band_bg != Color::Reset
-            {
+            // The focused pane of the focused workspace sits on a band the
+            // full width of the block, summary included. The navigate
+            // cursor's block fill replaces it, so one highlight shows.
+            if active && pane_row.focused && show_focus && workspace_focused && !summary_lift {
                 let rows = (pane_row.display_height() as u16).min(rect.bottom() - y);
-                let band = Rect::new(
-                    base_x,
-                    y,
-                    rect.right().saturating_sub(1).saturating_sub(base_x),
-                    rows,
-                );
-                buffer.set_style(band, Style::default().bg(band_bg));
+                let band = Rect::new(rect.x, y, rect.width, rows);
+                buffer.set_style(band, Style::default().bg(palette.active_row_bg));
             }
             // The spine runs straight through every pane row in every
             // tab; presence never depends on focus, only its color does.

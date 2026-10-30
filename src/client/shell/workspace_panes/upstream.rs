@@ -37,12 +37,12 @@ pub(super) fn mouse_capture(config: &ClientShellConfig) -> bool {
     config.mouse_capture
 }
 
-/// Unified status glyphs: working spins an arc, blocked and done are a filled
+/// Unified status glyphs: working spins braille, blocked and done are a filled
 /// dot told apart by color, idle a hollow ring, and shells a middle dot.
 /// Classic layout keeps its own dots/symbols mapping untouched; this
 /// override only drives unified pane rows through the call below.
 ///
-/// The working glyph animates through arc frames driven by the render
+/// The working glyph animates through braille frames driven by the render
 /// clock. The client loop already wakes roughly every 100ms, so the
 /// spinner advances without extra timer plumbing.
 pub(super) fn status_icon(status: AgentStatus, _config: &ClientShellConfig) -> &'static str {
@@ -54,12 +54,14 @@ pub(super) fn status_icon(status: AgentStatus, _config: &ClientShellConfig) -> &
     }
 }
 
-/// Arc spinner frames for the working glyph, sampled in order. Arcs share the
-/// ring and dot metrics, so state switches never shift the glyph.
-const WORKING_SPINNER_FRAMES: [&str; 4] = ["◜", "◝", "◞", "◟"];
+/// Braille spinner frames for the working glyph, sampled in order. Busy and
+/// unmistakable at a glance; the tradeoff is vertical metrics: braille cells
+/// render full-height next to the centered idle ring, so state switches can
+/// visibly shift the glyph by a pixel or two.
+const WORKING_SPINNER_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 /// One frame per client tick keeps the cadence even: the loop wakes roughly
-/// every 100ms, so each repaint advances exactly one frame.
+/// every 100ms, so each repaint advances exactly one frame for a 1.0s cycle.
 /// An off-multiple interval (e.g. 120ms) aliases into stalls and skips.
 const SPINNER_FRAME_MS: u128 = 100;
 
@@ -719,7 +721,7 @@ mod tests {
     }
 
     #[test]
-    fn working_glyph_spins_through_arc_frames() {
+    fn working_glyph_spins_through_braille_frames() {
         let config = config();
         assert!(WORKING_SPINNER_FRAMES.contains(&status_icon(AgentStatus::Working, &config)));
         let start = spinner_epoch();

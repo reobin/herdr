@@ -26,13 +26,16 @@ fn panes_state(config: &Config, snapshot: ClientShellSnapshot) -> ClientShellSta
 }
 
 /// The sidebar columns of each frame row, right-trimmed. The working
-/// glyph animates through arc frames, so every frame pins to the first
+/// glyph animates through braille frames, so every frame pins to the first
 /// one before exact row comparisons; the frame sequence itself is covered
 /// by the upstream glyph unit tests.
 fn normalize_spinner(row: String) -> String {
-    const FRAMES: [char; 4] = ['\u{25dc}', '\u{25dd}', '\u{25de}', '\u{25df}'];
+    const FRAMES: [char; 10] = [
+        '\u{280b}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283c}', '\u{2834}', '\u{2826}',
+        '\u{2827}', '\u{2807}', '\u{280f}',
+    ];
     row.chars()
-        .map(|ch| if FRAMES.contains(&ch) { '\u{25dc}' } else { ch })
+        .map(|ch| if FRAMES.contains(&ch) { '\u{280b}' } else { ch })
         .collect()
 }
 
@@ -201,11 +204,11 @@ fn panes_layout_renders_headers_gap_indent_and_pane_text_at_fixed_geometry() {
             " repo",
             " │ · shell",
             " │ · shell",
-            " main",
+            " ╰ main",
             "",
             " ws_2",
-            " │ ◜ herdr pi",
-            " │",
+            " │ ⠋ herdr pi",
+            " ╰",
             "",
             "",
             "",
@@ -339,12 +342,12 @@ fn navigate_selection_marks_type_with_a_block_fill() {
     );
     // Branch footers render quiet in every state, a step down from the
     // pane rows above them.
-    let branch = row_of(" con-4403-auth");
-    assert_eq!(buffer[(1, branch)].fg, palette.overlay1);
-    assert!(!buffer[(1, branch)].modifier.contains(Modifier::BOLD));
-    let main = row_of(" main");
+    let branch = row_of(" ╰ con-4403-auth");
+    assert_eq!(buffer[(3, branch)].fg, palette.overlay1);
+    assert!(!buffer[(3, branch)].modifier.contains(Modifier::BOLD));
+    let main = row_of(" ╰ main");
     assert_eq!(
-        buffer[(1, main)].fg,
+        buffer[(3, main)].fg,
         palette.overlay1,
         "branch stays quiet when focused"
     );
@@ -355,7 +358,7 @@ fn navigate_selection_marks_type_with_a_block_fill() {
         "lone tab runs straight down the spine: {rows:?}"
     );
     assert!(
-        rows.iter().any(|row| row == " │ ◜ herdr pi"),
+        rows.iter().any(|row| row == " │ ⠋ herdr pi"),
         "second lone tab runs straight down the spine: {rows:?}"
     );
 
@@ -371,7 +374,7 @@ fn navigate_selection_marks_type_with_a_block_fill() {
         "focused `·` follows the title"
     );
     assert!(buffer[(3, focused_pane)].modifier.contains(Modifier::BOLD));
-    let working_pane = row_of(" │ ◜ herdr pi");
+    let working_pane = row_of(" │ ⠋ herdr pi");
     // Unselected agent rows keep their signal hue and lose only bold.
     assert_eq!(
         buffer[(5, working_pane)].fg,
@@ -391,34 +394,6 @@ fn navigate_selection_marks_type_with_a_block_fill() {
         ratatui::style::Color::Yellow,
         "background tab keeps its working glyph hue"
     );
-}
-
-#[test]
-fn focus_band_falls_back_to_selection_when_theme_leaves_surface_to_terminal() {
-    let mut snapshot = two_workspace_snapshot();
-    snapshot.focused_workspace_id = Some("ws_2".into());
-    snapshot.focused_tab_id = Some("tab_2".into());
-    snapshot.focused_pane_id = Some("pane_3".into());
-    snapshot.workspaces[0].focused = false;
-    snapshot.workspaces[1].focused = true;
-    snapshot.tabs[0].focused = false;
-    snapshot.tabs[1].focused = true;
-    for pane in &mut snapshot.panes {
-        pane.focused = pane.pane_id == "pane_3";
-    }
-    snapshot.agents[0].focused = true;
-    let mut state = panes_state(&panes_config(), snapshot);
-    state.config.palette.surface0 = ratatui::style::Color::Reset;
-    state.config.palette.selection_bg = ratatui::style::Color::Rgb(34, 50, 73);
-    let frame = state.compose(100, 16).expect("focused agent");
-    let rows = sidebar_rows(&frame);
-    let buffer = frame.to_ratatui_buffer().expect("buffer");
-
-    let pane = rows
-        .iter()
-        .position(|row| row.contains("herdr pi"))
-        .expect("pane row") as u16;
-    assert_eq!(buffer[(5, pane)].bg, ratatui::style::Color::Rgb(34, 50, 73));
 }
 
 #[test]
@@ -466,15 +441,19 @@ fn agent_rows_follow_activity_detail_lifts_with_selection() {
     // The focused workspace lifts the summary even without the cursor.
     assert_eq!(buffer[(5, detail)].fg, palette.subtext0);
     assert!(!buffer[(5, detail)].modifier.contains(Modifier::BOLD));
-    // The focused pane sits on a filled band across both of its rows,
-    // from the spine to the edge.
-    for (x, y) in [(1, pane), (5, pane), (23, pane), (1, detail), (23, detail)] {
-        assert_eq!(buffer[(x, y)].bg, palette.surface0, "band at ({x}, {y})");
+    // The focused pane sits on a band across both of its rows, the full
+    // width of the block, and is the block's only focus fill.
+    for (x, y) in [(0, pane), (5, pane), (23, pane), (0, detail), (23, detail)] {
+        assert_eq!(
+            buffer[(x, y)].bg,
+            palette.active_row_bg,
+            "band at ({x}, {y})"
+        );
     }
     assert_eq!(
-        buffer[(1, pane - 1)].bg,
-        palette.active_row_bg,
-        "band stops at the pane, inside the block fill"
+        buffer[(0, pane - 1)].bg,
+        palette.sidebar_bg,
+        "band stops at the pane; the block keeps no fill of its own"
     );
 
     // Background workspaces stay tertiary: focus back on ws_1 while the
@@ -815,7 +794,7 @@ fn parked_workspace_collapses_to_a_single_row() {
             " repo",
             " │ · shell",
             " │ · shell",
-            " main",
+            " ╰ main",
             "",
             " ws_2",
             "",
@@ -1394,7 +1373,7 @@ fn lone_tab_skips_its_header_and_runs_straight_down_the_spine() {
     let rows = sidebar_rows(&frame);
     assert_eq!(
         rows[2..6],
-        [" repo", " │ · shell", " │ · shell", " main",],
+        [" repo", " │ · shell", " │ · shell", " ╰ main",],
         "{rows:?}"
     );
     assert_eq!(
@@ -1616,6 +1595,46 @@ fn header_details_show_only_known_git_values_for_children_too() {
         .all(|token| token.kind != ResolvedTokenKind::StateIcon));
 }
 
+#[test]
+fn navigate_cursor_on_the_focused_workspace_hides_the_focus_band() {
+    let mut state = panes_state(&panes_config(), two_workspace_snapshot());
+    state.mode = ClientShellMode::Navigate;
+    state.navigate_workspace_id = state.navigation_target(&ClientEndpointId::Local, "ws_1");
+    let frame = state.compose(100, 16).expect("selected sidebar");
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    let palette = &state.config.palette;
+    let block = state
+        .hits
+        .workspaces
+        .iter()
+        .find(|hit| hit.workspace_id == "ws_1")
+        .expect("ws_1 hit")
+        .rect;
+    for y in block.y..block.bottom() {
+        assert_eq!(
+            buffer[(0, y)].bg,
+            palette.selection_bg,
+            "cursor fill at row {y}"
+        );
+    }
+}
+
+#[test]
+fn branch_footer_curls_off_the_spine_with_ahead_behind_at_the_edge() {
+    let mut snapshot = two_workspace_snapshot();
+    snapshot.workspaces[0].git_ahead_behind = Some((2, 1));
+    let mut state = panes_state(&panes_config(), snapshot);
+    let frame = state.compose(100, 16).expect("panes sidebar");
+    let rows = sidebar_rows(&frame);
+    let footer = rows
+        .iter()
+        .find(|row| row.starts_with(" ╰ main"))
+        .unwrap_or_else(|| panic!("footer row: {rows:?}"));
+    // Ahead/behind ends in the elapsed column, where tab rules end too.
+    assert!(footer.ends_with(" ↑2 ↓1"), "footer: {footer:?}");
+    assert_eq!(footer.chars().count(), 23, "footer: {footer:?}");
+}
+
 fn pane_row_text(config: &Config) -> String {
     let mut snapshot = snapshot();
     snapshot.agents.push(agent("pane_1"));
@@ -1627,7 +1646,7 @@ fn pane_row_text(config: &Config) -> String {
 
 #[test]
 fn default_agent_layout_shows_label_then_harness() {
-    assert_eq!(pane_row_text(&panes_config()), " │ ◜ herdr pi");
+    assert_eq!(pane_row_text(&panes_config()), " │ ⠋ herdr pi");
 }
 
 #[test]
@@ -1640,7 +1659,7 @@ fn default_agent_layout_puts_reported_summary_on_its_own_row() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], " │ ◜ herdr pi");
+    assert_eq!(rows[rect.y as usize], " │ ⠋ herdr pi");
     assert_eq!(rows[rect.y as usize + 1], " │   auth");
 }
 
@@ -1656,7 +1675,7 @@ fn harness_label_wins_over_slug_agent_name() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], " │ ◜ herdr claude");
+    assert_eq!(rows[rect.y as usize], " │ ⠋ herdr claude");
 }
 
 #[test]
@@ -1669,7 +1688,7 @@ fn missing_summary_falls_back_to_terminal_title() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], " │ ◜ herdr pi");
+    assert_eq!(rows[rect.y as usize], " │ ⠋ herdr pi");
     assert_eq!(rows[rect.y as usize + 1], " │   CON-4665 explain …");
 }
 
@@ -1695,7 +1714,7 @@ fn agent_row_without_summary_reserves_a_blank_second_row() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], " │ ◜ herdr pi");
+    assert_eq!(rows[rect.y as usize], " │ ⠋ herdr pi");
     assert_eq!(rows[rect.y as usize + 1], " │");
     assert_eq!(state.hits.workspace_panes.len(), 2);
     assert!(
@@ -1729,12 +1748,12 @@ fn tab_headers_rule_every_tab_name_to_the_edge() {
         [
             " repo",
             " │ 1 ──────────────────",
-            " │ ◜ herdr pi",
+            " │ ⠋ herdr pi",
             " │",
             " │ · shell",
             " │ servers ────────────",
             " │ · shell",
-            " main",
+            " ╰ main",
         ],
         "{rows:?}"
     );
@@ -1809,12 +1828,12 @@ fn second_tab_selection_keeps_pipe_filled_above_it() {
         [
             " repo",
             " │ 1 ──────────────────",
-            " │ ◜ herdr pi",
+            " │ ⠋ herdr pi",
             " │",
             " │ · shell",
             " │ servers ────────────",
             " │ · shell",
-            " main",
+            " ╰ main",
         ],
         "{rows:?}"
     );
@@ -1876,7 +1895,7 @@ fn custom_agent_layout_flattens_and_drops_tokens_the_layout_shows() {
         ],
         vec![AgentSidebarToken::StateText],
     ];
-    assert_eq!(pane_row_text(&config), " │ ◜ pi working");
+    assert_eq!(pane_row_text(&config), " │ ⠋ pi working");
 }
 
 #[test]
@@ -1890,7 +1909,7 @@ fn custom_agent_layout_without_summary_reserves_no_second_row() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     let (rect, _, _) = state.hits.workspace_panes[0];
-    assert_eq!(rows[rect.y as usize], " │ ◜ pi herdr");
+    assert_eq!(rows[rect.y as usize], " │ ⠋ pi herdr");
     assert_eq!(state.hits.workspace_panes.len(), 2);
     assert_eq!(state.hits.workspace_panes[1].0.y, rect.y + 1);
 }
@@ -1899,7 +1918,7 @@ fn custom_agent_layout_without_summary_reserves_no_second_row() {
 fn custom_agent_layout_that_resolves_empty_falls_back_to_title_and_agent() {
     let mut config = panes_config();
     config.ui.sidebar.agents.rows = vec![vec![AgentSidebarToken::Machine]];
-    assert_eq!(pane_row_text(&config), " │ ◜ herdr pi");
+    assert_eq!(pane_row_text(&config), " │ ⠋ herdr pi");
 }
 
 #[test]
@@ -1954,10 +1973,10 @@ fn pane_rows_under_worktree_children_indent_with_spaces() {
         [
             "       repo",
             "       │ · shell",
-            "       worktree/ws_2",
+            "       ╰ worktree/ws_2",
             "       repo",
             "       │ · shell",
-            "       worktree/ws_3",
+            "       ╰ worktree/ws_3",
         ],
         "children hug the parent with no gap: {rows:?}"
     );
@@ -2039,7 +2058,7 @@ fn working_row_right_aligns_elapsed_on_first_row_only() {
     let (rect, _, _) = state.hits.workspace_panes[0];
     let first = &rows[rect.y as usize];
     assert!(
-        first.starts_with(" │ ◜ herdr pi"),
+        first.starts_with(" │ ⠋ herdr pi"),
         "label keeps its full text: {first:?}"
     );
     assert!(first.ends_with("12m"), "elapsed right aligned: {first:?}");
