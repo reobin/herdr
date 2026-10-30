@@ -344,10 +344,6 @@ pub(super) fn handle_click(
     point: (u16, u16),
     outcome: &mut ClientShellInput,
 ) -> bool {
-    if let Some((endpoint_id, workspace_id)) = upstream::collapse_toggle_at(shell, point) {
-        upstream::toggle_workspace_collapsed(shell, &endpoint_id, &workspace_id, outcome);
-        return true;
-    }
     let Some((endpoint_id, pane_id)) = upstream::pane_hit_at(shell, point) else {
         return false;
     };
@@ -696,21 +692,18 @@ impl<'a> Active<'a> {
             .and_then(|machine| machine.snapshot)
     }
 
-    /// Pane count and hottest status for the header title. Sections
-    /// already hold one row per pane, so this needs no second walk over
-    /// the snapshot.
-    fn pane_summary(&self, machine: usize, workspace_id: &str) -> (usize, AgentStatus) {
-        let mut count = 0;
+    /// Hottest pane status for the header title. Sections already hold
+    /// one row per pane, so this needs no second walk over the snapshot.
+    fn hottest_status(&self, machine: usize, workspace_id: &str) -> AgentStatus {
         let mut worst = AgentStatus::Unknown;
         for section in self.sections(machine, workspace_id) {
             for row in &section.rows {
-                count += 1;
                 if status_severity(row.status) > status_severity(worst) {
                     worst = row.status;
                 }
             }
         }
-        (count, worst)
+        worst
     }
 
     fn block_height(
@@ -758,9 +751,7 @@ impl<'a> Active<'a> {
         let sections = self.sections(block.machine, facts.workspace_id);
         // The title carries the hottest pane status: tertiary while the
         // workspace rests, signal-colored while anything needs attention.
-        // The count stays neutral so hue alone marks the workspace name.
-        // Bold follows the same emphasis on both.
-        let (pane_count, worst) = self.pane_summary(block.machine, facts.workspace_id);
+        let worst = self.hottest_status(block.machine, facts.workspace_id);
         let emphasized = (show_focus && facts.focused) || selected || dragged;
         let bold = if emphasized {
             Modifier::BOLD
@@ -777,14 +768,9 @@ impl<'a> Active<'a> {
             AgentStatus::Idle | AgentStatus::Unknown => palette.text,
         };
         let title_style = Style::default().fg(title).add_modifier(bold);
-        let parked = self.parked(block.machine, facts.workspace_id);
-        let count = upstream::collapse_count_text(pane_count, parked);
-        let count_style = Style::default().fg(palette.overlay0).add_modifier(bold);
-        let count = Some((count.as_str(), count_style));
-        if parked {
-            // One row only: the name plus the count. Branch, tabs, and
-            // panes all give up their rows; the count keeps the pane
-            // total visible and stays clickable to unpark.
+        if self.parked(block.machine, facts.workspace_id) {
+            // One row only: the name. Branch, tabs, and panes all give up
+            // their rows.
             render_header(
                 buffer,
                 rect,
@@ -794,7 +780,6 @@ impl<'a> Active<'a> {
                 selected,
                 dragged,
                 palette,
-                count,
                 title_style,
             );
             return;
@@ -808,7 +793,6 @@ impl<'a> Active<'a> {
             selected,
             dragged,
             palette,
-            count,
             title_style,
         );
         let Some(endpoint_id) = self.machines.get(block.machine).map(|machine| machine.id) else {
@@ -954,7 +938,6 @@ fn render_header(
     selected: bool,
     dragged: bool,
     palette: &Palette,
-    count: Option<(&str, Style)>,
     title_style: Style,
 ) {
     // The first row carries the hottest pane status; weight alone marks
@@ -969,10 +952,6 @@ fn render_header(
             Modifier::empty()
         });
     let secondary_style = Style::default().fg(palette.overlay0);
-    // The count hugs the right edge of the first row, ending two cells
-    // before the block edge; the name truncates around it. Same geometry
-    // as `collapse_toggle_rect`, which hit-tests the count.
-    let count_width = count.map_or(0, |(text, _)| slash_header_width(text));
     for (row_index, row) in rows.iter().enumerate() {
         let y = area.y.saturating_add(row_index as u16);
         if y >= area.bottom() {
@@ -980,11 +959,6 @@ fn render_header(
         }
         let x = area.x.saturating_add(if entry.indented { 7 } else { 1 });
         let width = area.right().saturating_sub(2).saturating_sub(x);
-        let width = if row_index == 0 && count_width > 0 {
-            width.saturating_sub(count_width as u16 + 1)
-        } else {
-            width
-        };
         if row_index == 0 && is_slash_header(row) {
             render_slash_header(
                 buffer,
@@ -1021,13 +995,6 @@ fn render_header(
                 usize::from(width),
             );
             Paragraph::new(Line::from(spans)).render(Rect::new(x, y, width, 1), buffer);
-        }
-        if row_index == 0 {
-            if let Some((text, style)) = count {
-                let full = area.right().saturating_sub(2).saturating_sub(x);
-                let start = x.saturating_add(full.saturating_sub(count_width as u16));
-                put_text(buffer, start, y, count_width as u16, text, style);
-            }
         }
     }
 }

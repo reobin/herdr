@@ -509,30 +509,6 @@ pub(super) fn workspace_collapsed(collapsed: Option<&HashSet<String>>, workspace
     collapsed.is_some_and(|sets| sets.contains(&workspace_collapse_key(workspace_id)))
 }
 
-/// Pane count toggle: `▾n` while expanded, `▸n` once parked. The same
-/// text is the collapse toggle in every header. One row versus many
-/// makes the state obvious twice over, and the symbol keeps the row
-/// narrow.
-pub(super) fn collapse_count_text(pane_count: usize, parked: bool) -> String {
-    format!("{}{pane_count}", if parked { "▸" } else { "▾" })
-}
-
-pub(super) fn collapse_count_width(text: &str) -> usize {
-    use unicode_width::UnicodeWidthStr;
-    UnicodeWidthStr::width(text)
-}
-
-/// Toggle cell for a rendered workspace block: the count hugs the right
-/// edge of the first row, ending two cells before the block edge so the
-/// last cell stays free for the worktree group toggle. Both sidebar paths
-/// share the block's right edge even though the machine path indents its
-/// content, so the outer hit rect suffices.
-pub(super) fn collapse_toggle_rect(outer: Rect, text_width: usize) -> Rect {
-    let end = outer.right().saturating_sub(2);
-    let x = end.saturating_sub(text_width as u16);
-    Rect::new(x, outer.y, end.saturating_sub(x), 1)
-}
-
 fn endpoint_snapshot<'s>(
     shell: &'s ClientShellState,
     endpoint_id: &ClientEndpointId,
@@ -547,48 +523,6 @@ fn endpoint_snapshot<'s>(
             .snapshot
             .as_deref()
     }
-}
-
-pub(super) fn workspace_pane_count(
-    shell: &ClientShellState,
-    endpoint_id: &ClientEndpointId,
-    workspace_id: &str,
-) -> usize {
-    endpoint_snapshot(shell, endpoint_id).map_or(0, |snapshot| {
-        snapshot
-            .panes
-            .iter()
-            .filter(|pane| pane.workspace_id == workspace_id)
-            .count()
-    })
-}
-
-/// Click on a count toggle: park or unpark that workspace without
-/// stealing focus, like the worktree group toggle. Inert in classic
-/// layout and in the collapsed rail, where headers show no counts.
-pub(super) fn collapse_toggle_at(
-    shell: &ClientShellState,
-    point: (u16, u16),
-) -> Option<(ClientEndpointId, String)> {
-    if !unified_layout(&shell.config) || shell.sidebar_collapsed {
-        return None;
-    }
-    shell.hits.workspaces.iter().find_map(|hit| {
-        if !super::super::contains(hit.rect, point) || point.1 != hit.rect.y {
-            return None;
-        }
-        let count = workspace_pane_count(shell, &hit.endpoint_id, &hit.workspace_id);
-        let parked = workspace_collapsed(
-            shell.collapsed_groups_for_endpoint(&hit.endpoint_id),
-            &hit.workspace_id,
-        );
-        let toggle = collapse_toggle_rect(
-            hit.rect,
-            collapse_count_width(&collapse_count_text(count, parked)),
-        );
-        super::super::contains(toggle, point)
-            .then(|| (hit.endpoint_id.clone(), hit.workspace_id.clone()))
-    })
 }
 
 pub(super) fn toggle_workspace_collapsed(
@@ -681,7 +615,7 @@ fn is_park_sentinel(
 /// unified layout is active with a focused workspace, swallows it
 /// otherwise so it never falls through to the endpoint command lookup.
 /// Non-sentinel bindings return `false`. Inert in classic layout and in
-/// the collapsed rail, like the count click.
+/// the collapsed rail.
 pub(super) fn handle_prefix_binding(
     shell: &mut ClientShellState,
     binding: &crate::input::KeybindMatch,

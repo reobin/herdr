@@ -201,12 +201,12 @@ fn panes_layout_renders_headers_gap_indent_and_pane_text_at_fixed_geometry() {
         vec![
             " spaces",
             "",
-            " repo                ▾2",
+            " repo",
             " main",
             " │ $ shell",
             " │ $ shell",
             "",
-            " ws_2                ▾1",
+            " ws_2",
             " │ ⠋ herdr / pi",
             " │",
             "",
@@ -313,7 +313,7 @@ fn navigate_selection_marks_type_with_a_block_fill() {
     }
 
     // Names carry the hottest pane status; weight marks focus and cursor.
-    let name = row_of(" ws_2                ▾1");
+    let name = row_of(" ws_2");
     assert_eq!(
         buffer[(1, name)].fg,
         ratatui::style::Color::Yellow,
@@ -323,7 +323,7 @@ fn navigate_selection_marks_type_with_a_block_fill() {
         buffer[(1, name)].modifier.contains(Modifier::BOLD),
         "selected name is bold"
     );
-    let focused = row_of(" repo                ▾2");
+    let focused = row_of(" repo");
     assert_eq!(
         buffer[(1, focused)].fg,
         palette.text,
@@ -333,7 +333,7 @@ fn navigate_selection_marks_type_with_a_block_fill() {
         buffer[(1, focused)].modifier.contains(Modifier::BOLD),
         "focused name stays bold"
     );
-    let idle = row_of(" ws_3                ▾0");
+    let idle = row_of(" ws_3");
     assert_eq!(buffer[(1, idle)].fg, palette.text);
     assert!(
         !buffer[(1, idle)].modifier.contains(Modifier::BOLD),
@@ -760,7 +760,7 @@ fn header_click_still_presses_the_workspace() {
 }
 
 #[test]
-fn parked_workspace_collapses_to_a_single_count_row() {
+fn parked_workspace_collapses_to_a_single_row() {
     let mut state = panes_state(&panes_config(), two_workspace_snapshot());
     state.toggle_collapsed_group(&ClientEndpointId::Local, workspace_collapse_key("ws_2"));
     let frame = state.compose(100, 16).expect("parked sidebar");
@@ -770,12 +770,12 @@ fn parked_workspace_collapses_to_a_single_count_row() {
         vec![
             " spaces",
             "",
-            " repo                ▾2",
+            " repo",
             " main",
             " │ $ shell",
             " │ $ shell",
             "",
-            " ws_2                ▸1",
+            " ws_2",
             "",
             "",
             "",
@@ -806,35 +806,6 @@ fn parked_workspace_collapses_to_a_single_count_row() {
             .all(|(_, _, pane)| pane != "pane_3"),
         "parked panes keep no click targets"
     );
-}
-
-#[test]
-fn count_toggle_click_parks_and_unparks_without_focusing() {
-    let mut state = panes_state(&panes_config(), two_workspace_snapshot());
-    state.compose(100, 16).expect("panes sidebar");
-    // The ws_1 `▾2` ends two cells before the 25-wide block edge.
-    let outcome = left_click(&mut state, 22, 2);
-    assert!(state.workspace_press.is_none(), "toggle never focuses");
-    assert!(outcome.repaint);
-    assert!(
-        state
-            .collapsed_groups
-            .contains(&workspace_collapse_key("ws_1")),
-        "toggle persists through the stock collapsed groups"
-    );
-    let frame = state.compose(100, 16).expect("parked sidebar");
-    assert_eq!(sidebar_rows(&frame)[2], " repo                ▸2");
-    assert_eq!(state.hits.workspaces[0].rect, Rect::new(0, 2, 25, 1));
-
-    let outcome = left_click(&mut state, 22, 2);
-    assert!(state.workspace_press.is_none());
-    assert!(outcome.repaint);
-    assert!(!state
-        .collapsed_groups
-        .contains(&workspace_collapse_key("ws_1")));
-    let frame = state.compose(100, 16).expect("unparked sidebar");
-    assert_eq!(sidebar_rows(&frame)[2], " repo                ▾2");
-    assert_eq!(state.hits.workspaces[0].rect, Rect::new(0, 2, 25, 4));
 }
 
 /// Snapshot with the server-published manifest entry for the sentinel,
@@ -900,8 +871,8 @@ command = "unified:toggle-workspace-park"
     let frame = state.compose(100, 16).expect("parked sidebar");
     assert_eq!(
         sidebar_rows(&frame)[2],
-        " repo                ▸2",
-        "sentinel-parked workspace renders as one count row"
+        " repo",
+        "sentinel-parked workspace renders as one row"
     );
     assert_eq!(state.hits.workspaces[0].rect, Rect::new(0, 2, 25, 1));
 
@@ -1136,7 +1107,7 @@ fn parked_header_click_still_focuses_without_unparking() {
         state
             .collapsed_groups
             .contains(&workspace_collapse_key("ws_2")),
-        "name clicks focus; only the count toggles"
+        "header clicks focus, never toggle"
     );
 }
 
@@ -1155,8 +1126,6 @@ fn parked_title_takes_the_hottest_pane_status_color() {
         "parked title reports blocked"
     );
     assert!(!buffer[(1, 7)].modifier.contains(Modifier::BOLD));
-    assert_eq!(buffer[(21, 7)].fg, palette.overlay0, "count stays neutral");
-    assert!(!buffer[(21, 7)].modifier.contains(Modifier::BOLD));
 }
 
 #[test]
@@ -1173,7 +1142,7 @@ fn parked_remote_workspace_collapses_to_one_row() {
         .iter()
         .find(|hit| hit.workspace_id == "ws_1" && hit.endpoint_id == remote)
         .expect("remote workspace hit");
-    assert!(rows[remote_hit.rect.y as usize].ends_with("▸1"));
+    assert!(rows[remote_hit.rect.y as usize].ends_with("repo"));
     assert_eq!(
         state
             .hits
@@ -1383,12 +1352,7 @@ fn lone_tab_skips_its_header_and_runs_straight_down_the_spine() {
     let rows = sidebar_rows(&frame);
     assert_eq!(
         rows[2..6],
-        [
-            " repo                ▾2",
-            " main",
-            " │ $ shell",
-            " │ $ shell",
-        ],
+        [" repo", " main", " │ $ shell", " │ $ shell",],
         "{rows:?}"
     );
     assert_eq!(
@@ -1501,7 +1465,7 @@ fn renamed_header_renders_slash_with_both_sides_in_title_color() {
         .iter()
         .position(|row| row.contains("manifest-or"))
         .expect("renamed header row") as u16;
-    assert_eq!(rows[header as usize], " repo / manifest-or… ▾1");
+    assert_eq!(rows[header as usize], " repo / manifest-order");
     let buffer = frame.to_ratatui_buffer().expect("buffer");
     let palette = &state.config.palette;
     assert_eq!(buffer[(2, header)].fg, palette.text, "resting repo");
@@ -1716,7 +1680,7 @@ fn tab_trees_branch_every_tab_with_a_tee() {
     assert_eq!(
         rows[2..10],
         [
-            " repo                ▾3",
+            " repo",
             " main",
             " ├─ 1",
             " │  ⠋ herdr / pi",
@@ -1797,7 +1761,7 @@ fn second_tab_selection_keeps_pipe_filled_above_it() {
     assert_eq!(
         rows[2..10],
         [
-            " repo                ▾3",
+            " repo",
             " main",
             " ├─ 1",
             " │  ⠋ herdr / pi",
@@ -1908,7 +1872,7 @@ fn tall_workspace_clips_pane_rows_to_the_sidebar_body() {
     assert!(hits
         .iter()
         .all(|(rect, _, _)| rect.y >= body.y && rect.y < body.bottom()));
-    assert_eq!(sidebar_rows(&frame)[2], " repo               ▾20");
+    assert_eq!(sidebar_rows(&frame)[2], " repo");
 }
 
 #[test]
@@ -1937,15 +1901,15 @@ fn pane_rows_under_worktree_children_indent_with_spaces() {
     let rows = sidebar_rows(&frame);
     let start = rows
         .iter()
-        .position(|row| row == "       repo          ▾1")
+        .position(|row| row == "       repo")
         .expect("first child header");
     assert_eq!(
         rows[start..start + 6],
         [
-            "       repo          ▾1",
+            "       repo",
             "       worktree/ws_2",
             "       │ $ shell",
-            "       repo          ▾1",
+            "       repo",
             "       worktree/ws_3",
             "       │ $ shell",
         ],
