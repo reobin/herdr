@@ -224,26 +224,10 @@ pub(crate) fn render_sidebar(
         state.collapsed_groups,
     );
     let (workspace_area, detail_area) = panes.areas(area, workspace_area, detail_area, hits);
-    put_text(
-        buffer,
-        workspace_area.x,
-        workspace_area.y,
-        workspace_area.width,
-        " spaces",
-        Style::default()
-            .fg(palette.overlay0)
-            .add_modifier(Modifier::BOLD),
-    );
+    panes.render_space_header(buffer, workspace_area, config);
 
     let entries = workspace_entries(snapshot, state.collapsed_groups);
-    let body = Rect::new(
-        workspace_area.x,
-        workspace_area.y.saturating_add(WORKSPACE_HEADER_ROWS),
-        workspace_area.width,
-        workspace_area
-            .height
-            .saturating_sub(WORKSPACE_HEADER_ROWS + 1),
-    );
+    let body = panes.workspace_body(workspace_area);
     hits.workspace_body = body;
     let row_heights = entries
         .iter()
@@ -375,10 +359,10 @@ pub(crate) fn render_sidebar(
         super::scroll::render_list_scrollbar(buffer, track, metrics, palette);
     }
 
-    if let Some(row) = state.workspace_drop_indicator_row.filter(|row| {
-        *row >= workspace_area.y.saturating_add(1)
-            && *row < workspace_area.bottom().saturating_sub(1)
-    }) {
+    if let Some(row) = state
+        .workspace_drop_indicator_row
+        .filter(|row| panes.drop_row_visible(*row, workspace_area))
+    {
         put_text(
             buffer,
             body.x,

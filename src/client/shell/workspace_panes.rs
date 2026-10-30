@@ -458,6 +458,75 @@ impl<'a> SidebarPanes<'a> {
         }
     }
 
+    /// Unified layout drops the `spaces`/`machines` title row and its blank
+    /// row, handing both back to the list. Classic keeps both rows.
+    pub(super) fn header_height(&self) -> u16 {
+        if self.active.is_some() {
+            0
+        } else {
+            super::state::WORKSPACE_HEADER_ROWS
+        }
+    }
+
+    pub(super) fn render_space_header(
+        &self,
+        buffer: &mut Buffer,
+        workspace_area: Rect,
+        config: &ClientShellConfig,
+    ) {
+        if self.active.is_some() {
+            return;
+        }
+        let palette = upstream::palette(config);
+        put_text(
+            buffer,
+            workspace_area.x,
+            workspace_area.y,
+            workspace_area.width,
+            " spaces",
+            Style::default()
+                .fg(palette.overlay0)
+                .add_modifier(Modifier::BOLD),
+        );
+    }
+
+    pub(super) fn render_machine_header(
+        &self,
+        buffer: &mut Buffer,
+        workspace_area: Rect,
+        config: &ClientShellConfig,
+    ) {
+        if self.active.is_some() {
+            return;
+        }
+        let palette = upstream::palette(config);
+        put_text(
+            buffer,
+            workspace_area.x,
+            workspace_area.y,
+            workspace_area.width,
+            " machines",
+            Style::default()
+                .fg(palette.overlay0)
+                .add_modifier(Modifier::BOLD),
+        );
+    }
+
+    pub(super) fn workspace_body(&self, workspace_area: Rect) -> Rect {
+        let header = self.header_height();
+        Rect::new(
+            workspace_area.x,
+            workspace_area.y.saturating_add(header),
+            workspace_area.width,
+            workspace_area.height.saturating_sub(header + 1),
+        )
+    }
+
+    pub(super) fn drop_row_visible(&self, row: u16, workspace_area: Rect) -> bool {
+        row >= workspace_area.y.saturating_add(self.header_height().min(1))
+            && row < workspace_area.bottom().saturating_sub(1)
+    }
+
     /// The workspace section takes the whole sidebar: no agent section and no
     /// draggable divider.
     pub(super) fn areas(
@@ -893,9 +962,8 @@ fn truncate_text(text: &str, max_width: usize) -> String {
     format!("{output}…")
 }
 
-/// Header and footer text area of one block row. The text sits one cell in
-/// so it lines up with the upstream `spaces` title; worktree children
-/// indent by the same offset, with spaces.
+/// Header and footer text area of one block row. The text sits one cell in;
+/// worktree children indent by the same offset, with spaces.
 fn text_area(area: Rect, entry: &Entry) -> Rect {
     let x = area.x.saturating_add(if entry.indented { 7 } else { 1 });
     let width = area.right().saturating_sub(2).saturating_sub(x);

@@ -199,8 +199,6 @@ fn panes_layout_renders_headers_gap_indent_and_pane_text_at_fixed_geometry() {
     assert_eq!(
         rows,
         vec![
-            " spaces",
-            "",
             " repo",
             " │ · shell",
             " │ · shell",
@@ -214,10 +212,12 @@ fn panes_layout_renders_headers_gap_indent_and_pane_text_at_fixed_geometry() {
             "",
             "",
             "",
+            "",
+            "",
             " new               menu «",
         ],
     );
-    assert_eq!(state.hits.workspace_body, Rect::new(0, 2, 25, 13));
+    assert_eq!(state.hits.workspace_body, Rect::new(0, 0, 25, 15));
     assert_eq!(
         state
             .hits
@@ -226,30 +226,30 @@ fn panes_layout_renders_headers_gap_indent_and_pane_text_at_fixed_geometry() {
             .map(|hit| (hit.workspace_id.as_str(), hit.rect))
             .collect::<Vec<_>>(),
         vec![
-            ("ws_1", Rect::new(0, 2, 25, 4)),
-            ("ws_2", Rect::new(0, 7, 25, 3)),
+            ("ws_1", Rect::new(0, 0, 25, 4)),
+            ("ws_2", Rect::new(0, 5, 25, 3)),
         ],
     );
     assert_eq!(
         state.hits.workspace_panes,
         vec![
             (
-                Rect::new(0, 3, 25, 1),
+                Rect::new(0, 1, 25, 1),
                 ClientEndpointId::Local,
                 "pane_1".to_owned()
             ),
             (
-                Rect::new(0, 4, 25, 1),
+                Rect::new(0, 2, 25, 1),
                 ClientEndpointId::Local,
                 "pane_2".to_owned()
             ),
             (
-                Rect::new(0, 8, 25, 1),
+                Rect::new(0, 6, 25, 1),
                 ClientEndpointId::Local,
                 "pane_3".to_owned()
             ),
             (
-                Rect::new(0, 9, 25, 1),
+                Rect::new(0, 7, 25, 1),
                 ClientEndpointId::Local,
                 "pane_3".to_owned()
             ),
@@ -261,17 +261,17 @@ fn panes_layout_renders_headers_gap_indent_and_pane_text_at_fixed_geometry() {
 
     let buffer = frame.to_ratatui_buffer().expect("buffer");
     let bold = |x: u16, y: u16| buffer[(x, y)].modifier.contains(Modifier::BOLD);
-    assert!(bold(1, 2), "focused workspace header is bold");
-    assert!(!bold(1, 7), "unfocused workspace header is not bold");
+    assert!(bold(1, 0), "focused workspace header is bold");
+    assert!(!bold(1, 5), "unfocused workspace header is not bold");
     // Agent rows keep their working hue in background tabs too, losing
     // only bold; the glyph never fades with the rest of the tab.
     assert_eq!(
-        buffer[(3, 8)].fg,
+        buffer[(3, 6)].fg,
         ratatui::style::Color::Yellow,
         "background tab keeps its working glyph hue"
     );
     assert!(
-        !buffer[(3, 8)].modifier.contains(Modifier::DIM),
+        !buffer[(3, 6)].modifier.contains(Modifier::DIM),
         "background glyph never dims"
     );
 }
@@ -755,7 +755,7 @@ fn classic_mode_keeps_the_agent_section_and_records_no_pane_rows() {
 fn pane_row_click_focuses_the_pane_instead_of_pressing_the_workspace() {
     let mut state = panes_state(&panes_config(), two_workspace_snapshot());
     state.compose(100, 16).expect("panes sidebar");
-    let outcome = left_click(&mut state, 3, 4);
+    let outcome = left_click(&mut state, 3, 2);
     assert!(state.workspace_press.is_none());
     let [ClientShellAction::Endpoint { request, .. }] = &outcome.actions[..] else {
         panic!("pane row click should focus the pane");
@@ -770,7 +770,7 @@ fn pane_row_click_focuses_the_pane_instead_of_pressing_the_workspace() {
 fn header_click_still_presses_the_workspace() {
     let mut state = panes_state(&panes_config(), two_workspace_snapshot());
     state.compose(100, 16).expect("panes sidebar");
-    left_click(&mut state, 3, 7);
+    left_click(&mut state, 3, 5);
     assert_eq!(
         state
             .workspace_press
@@ -789,14 +789,14 @@ fn parked_workspace_collapses_to_a_single_row() {
     assert_eq!(
         rows,
         vec![
-            " spaces",
-            "",
             " repo",
             " │ · shell",
             " │ · shell",
             " › main",
             "",
             " ws_2",
+            "",
+            "",
             "",
             "",
             "",
@@ -815,8 +815,8 @@ fn parked_workspace_collapses_to_a_single_row() {
             .map(|hit| (hit.workspace_id.as_str(), hit.rect))
             .collect::<Vec<_>>(),
         vec![
-            ("ws_1", Rect::new(0, 2, 25, 4)),
-            ("ws_2", Rect::new(0, 7, 25, 1)),
+            ("ws_1", Rect::new(0, 0, 25, 4)),
+            ("ws_2", Rect::new(0, 5, 25, 1)),
         ],
     );
     assert!(
@@ -891,11 +891,11 @@ command = "unified:toggle-workspace-park"
     assert!(state.endpoint_error.is_none());
     let frame = state.compose(100, 16).expect("parked sidebar");
     assert_eq!(
-        sidebar_rows(&frame)[2],
+        sidebar_rows(&frame)[0],
         " repo",
         "sentinel-parked workspace renders as one row"
     );
-    assert_eq!(state.hits.workspaces[0].rect, Rect::new(0, 2, 25, 1));
+    assert_eq!(state.hits.workspaces[0].rect, Rect::new(0, 0, 25, 1));
 
     let _ = state.handle_raw_events(vec![RawInputEvent::Key(prefix())]);
     let _ = state.handle_raw_events(vec![RawInputEvent::Key(u())]);
@@ -1116,7 +1116,7 @@ fn parked_header_click_still_focuses_without_unparking() {
     let mut state = panes_state(&panes_config(), two_workspace_snapshot());
     state.toggle_collapsed_group(&ClientEndpointId::Local, workspace_collapse_key("ws_2"));
     state.compose(100, 16).expect("parked sidebar");
-    left_click(&mut state, 3, 7);
+    left_click(&mut state, 3, 5);
     assert_eq!(
         state
             .workspace_press
@@ -1142,11 +1142,11 @@ fn parked_title_takes_the_hottest_pane_status_color() {
     let buffer = frame.to_ratatui_buffer().expect("buffer");
     let palette = &state.config.palette;
     assert_eq!(
-        buffer[(1, 7)].fg,
+        buffer[(1, 5)].fg,
         palette.red,
         "parked title reports blocked"
     );
-    assert!(!buffer[(1, 7)].modifier.contains(Modifier::BOLD));
+    assert!(!buffer[(1, 5)].modifier.contains(Modifier::BOLD));
 }
 
 #[test]
@@ -1372,7 +1372,7 @@ fn lone_tab_skips_its_header_and_runs_straight_down_the_spine() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     assert_eq!(
-        rows[2..6],
+        rows[0..4],
         [" repo", " │ · shell", " │ · shell", " › main",],
         "{rows:?}"
     );
@@ -1509,7 +1509,7 @@ fn renamed_header_truncates_the_repo_before_the_label() {
     snapshot.workspaces[0].custom_label = true;
     let mut state = panes_state(&panes_config(), snapshot);
     let frame = state.compose(100, 16).expect("renamed sidebar");
-    assert_eq!(sidebar_rows(&frame)[2], " a-long-workspace-name");
+    assert_eq!(sidebar_rows(&frame)[0], " a-long-workspace-name");
 }
 
 #[test]
@@ -1744,7 +1744,7 @@ fn tab_headers_rule_every_tab_name_to_the_edge() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     assert_eq!(
-        rows[2..10],
+        rows[0..8],
         [
             " repo",
             " │ 1 ──────────────────",
@@ -1762,7 +1762,7 @@ fn tab_headers_rule_every_tab_name_to_the_edge() {
     // Tab `1` holds focus, so its spine goes primary while the other
     // tab's spine fades with the rest of its rows. Pane rows take no
     // horizontals; the pipe stays one straight line.
-    for y in [3u16, 4, 5, 6] {
+    for y in [1u16, 2, 3, 4] {
         assert_eq!(buffer[(1, y)].fg, palette.text, "selected spine at {y}");
         assert!(
             !buffer[(1, y)].modifier.contains(Modifier::BOLD),
@@ -1770,37 +1770,37 @@ fn tab_headers_rule_every_tab_name_to_the_edge() {
         );
     }
     assert_eq!(
-        buffer[(2, 4)].symbol(),
+        buffer[(2, 2)].symbol(),
         " ",
         "pane rows take no horizontals"
     );
     // The branch marker stays quiet whatever the spine above it does.
-    assert_eq!(buffer[(1, 9)].fg, palette.overlay0, "branch marker");
+    assert_eq!(buffer[(1, 7)].fg, palette.overlay0, "branch marker");
     assert_eq!(
-        buffer[(2, 5)].symbol(),
+        buffer[(2, 3)].symbol(),
         " ",
         "pane rows take no horizontals"
     );
     assert_eq!(
-        buffer[(1, 8)].fg,
+        buffer[(1, 6)].fg,
         palette.overlay0,
         "unfocused tab spine fades with its tab"
     );
     assert!(
-        buffer[(1, 8)].modifier.contains(Modifier::DIM),
+        buffer[(1, 6)].modifier.contains(Modifier::DIM),
         "unfocused tab spine dims"
     );
     assert!(
-        buffer[(3, 3)].modifier.contains(Modifier::BOLD),
+        buffer[(3, 1)].modifier.contains(Modifier::BOLD),
         "selected tab's name goes bold"
     );
     assert!(
-        !buffer[(3, 7)].modifier.contains(Modifier::BOLD),
+        !buffer[(3, 5)].modifier.contains(Modifier::BOLD),
         "other tabs' names stay quiet"
     );
-    assert_eq!(buffer[(5, 3)].symbol(), "─", "rule follows the name");
-    assert_eq!(buffer[(5, 3)].fg, palette.overlay0, "rule stays quiet");
-    assert!(buffer[(5, 3)].modifier.contains(Modifier::DIM), "rule dims");
+    assert_eq!(buffer[(5, 1)].symbol(), "─", "rule follows the name");
+    assert_eq!(buffer[(5, 1)].fg, palette.overlay0, "rule stays quiet");
+    assert!(buffer[(5, 1)].modifier.contains(Modifier::DIM), "rule dims");
 }
 
 #[test]
@@ -1826,7 +1826,7 @@ fn second_tab_selection_keeps_pipe_filled_above_it() {
     let frame = state.compose(100, 16).expect("panes sidebar");
     let rows = sidebar_rows(&frame);
     assert_eq!(
-        rows[2..10],
+        rows[0..8],
         [
             " repo",
             " │ 1 ──────────────────",
@@ -1841,7 +1841,7 @@ fn second_tab_selection_keeps_pipe_filled_above_it() {
     );
     let buffer = frame.to_ratatui_buffer().expect("buffer");
     let palette = &state.config.palette;
-    for y in [3u16, 4, 5, 6] {
+    for y in [1u16, 2, 3, 4] {
         assert_eq!(buffer[(1, y)].symbol(), "│", "pipe solid above at {y}");
         assert_eq!(
             buffer[(1, y)].fg,
@@ -1853,18 +1853,18 @@ fn second_tab_selection_keeps_pipe_filled_above_it() {
             "spine never bolds at {y}"
         );
     }
-    assert_eq!(buffer[(1, 8)].symbol(), "│", "selected tab keeps its pipe");
+    assert_eq!(buffer[(1, 6)].symbol(), "│", "selected tab keeps its pipe");
     assert_eq!(
-        buffer[(1, 8)].fg,
+        buffer[(1, 6)].fg,
         palette.text,
         "selected tab spine goes primary"
     );
     assert!(
-        buffer[(3, 7)].modifier.contains(Modifier::BOLD),
+        buffer[(3, 5)].modifier.contains(Modifier::BOLD),
         "only the selected tab's name goes bold"
     );
     assert!(
-        !buffer[(3, 3)].modifier.contains(Modifier::BOLD),
+        !buffer[(3, 1)].modifier.contains(Modifier::BOLD),
         "names above the selection stay quiet"
     );
 }
@@ -1939,7 +1939,7 @@ fn tall_workspace_clips_pane_rows_to_the_sidebar_body() {
     assert!(hits
         .iter()
         .all(|(rect, _, _)| rect.y >= body.y && rect.y < body.bottom()));
-    assert_eq!(sidebar_rows(&frame)[2], " repo");
+    assert_eq!(sidebar_rows(&frame)[0], " repo");
 }
 
 #[test]

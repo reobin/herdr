@@ -257,16 +257,7 @@ pub(super) fn render_expanded(
         crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split);
     let panes = workspace_panes::SidebarPanes::machines(config, state);
     let (workspace_area, detail_area) = panes.areas(area, workspace_area, detail_area, hits);
-    put_text(
-        buffer,
-        workspace_area.x,
-        workspace_area.y,
-        workspace_area.width,
-        " machines",
-        Style::default()
-            .fg(palette.overlay0)
-            .add_modifier(Modifier::BOLD),
-    );
+    panes.render_machine_header(buffer, workspace_area, config);
 
     let empty_collapsed_groups = HashSet::new();
 
@@ -296,14 +287,7 @@ pub(super) fn render_expanded(
             );
         }
     }
-    let body = Rect::new(
-        workspace_area.x,
-        workspace_area.y.saturating_add(WORKSPACE_HEADER_ROWS),
-        workspace_area.width,
-        workspace_area
-            .height
-            .saturating_sub(WORKSPACE_HEADER_ROWS + 1),
-    );
+    let body = panes.workspace_body(workspace_area);
     hits.workspace_body = body;
     let row_heights = rows
         .iter()
