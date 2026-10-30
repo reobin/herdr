@@ -367,6 +367,12 @@ fn navigate_selection_marks_type_with_a_block_fill() {
     let focused_pane = row_of(" │ $ shell");
     assert_eq!(buffer[(5, focused_pane)].fg, palette.text);
     assert!(buffer[(5, focused_pane)].modifier.contains(Modifier::BOLD));
+    assert_eq!(
+        buffer[(3, focused_pane)].fg,
+        palette.text,
+        "focused `$` follows the title"
+    );
+    assert!(buffer[(3, focused_pane)].modifier.contains(Modifier::BOLD));
     let working_pane = row_of(" │ ⠋ herdr / pi");
     // Unselected agent rows keep their signal hue and lose only bold.
     assert_eq!(
@@ -522,6 +528,40 @@ fn idle_agent_rows_sink_to_tertiary() {
         palette.overlay0,
         "idle glyph stays tertiary with its title"
     );
+}
+
+#[test]
+fn focused_idle_agent_glyph_and_separator_follow_the_title() {
+    let mut snapshot = two_workspace_snapshot();
+    snapshot.focused_workspace_id = Some("ws_2".into());
+    snapshot.focused_tab_id = Some("tab_2".into());
+    snapshot.focused_pane_id = Some("pane_3".into());
+    snapshot.workspaces[0].focused = false;
+    snapshot.workspaces[1].focused = true;
+    snapshot.tabs[0].focused = false;
+    snapshot.tabs[1].focused = true;
+    for pane in &mut snapshot.panes {
+        pane.focused = pane.pane_id == "pane_3";
+    }
+    snapshot.agents[0].focused = true;
+    snapshot.agents[0].agent_status = AgentStatus::Idle;
+    let mut state = panes_state(&panes_config(), snapshot);
+    let frame = state.compose(100, 16).expect("focused idle agent");
+    let rows = sidebar_rows(&frame);
+    let buffer = frame.to_ratatui_buffer().expect("buffer");
+    let palette = &state.config.palette;
+    let pane = rows
+        .iter()
+        .position(|row| row.contains("herdr / pi"))
+        .expect("pane row") as u16;
+    // Glyph at 3, `herdr` at 5..10, the separator's `/` at 11.
+    for column in [3, 5, 11] {
+        assert_eq!(buffer[(column, pane)].fg, palette.text, "column {column}");
+        assert!(
+            buffer[(column, pane)].modifier.contains(Modifier::BOLD),
+            "column {column}"
+        );
+    }
 }
 
 #[test]

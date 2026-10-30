@@ -1041,6 +1041,7 @@ fn pane_token_spans(
     workspace_style: Style,
     secondary_style: Style,
     custom_style: Style,
+    separator_style: Option<Style>,
     palette: &Palette,
     max_width: usize,
 ) -> Vec<Span<'static>> {
@@ -1056,7 +1057,7 @@ fn pane_token_spans(
     .into_iter()
     .map(|span| {
         if span.content == " · " {
-            Span::styled(" / ".to_owned(), span.style)
+            Span::styled(" / ".to_owned(), separator_style.unwrap_or(span.style))
         } else {
             span
         }
@@ -1195,12 +1196,11 @@ fn render_pane_rows(
                     }
                 }
             };
-            // The status glyph keeps its hue wherever the pane sits, like
-            // the title. Shell panes were never classified, so they carry
-            // a dim `$` where an agent shows its status glyph. The label
-            // keeps the row hue.
-            let glyph_style = if pane_row.status == AgentStatus::Unknown {
-                Style::default().fg(palette.overlay0)
+            // Signal glyphs keep their hue everywhere. Idle (`◌`) and
+            // shell (`$`) glyphs and separators follow the title.
+            let quiet = matches!(pane_row.status, AgentStatus::Idle | AgentStatus::Unknown);
+            let glyph_style = if quiet {
+                text_style
             } else {
                 Style::default().fg(upstream::status_color(pane_row.status, palette))
             };
@@ -1248,6 +1248,7 @@ fn render_pane_rows(
                     text_style,
                     text_style,
                     text_style,
+                    quiet.then_some(text_style),
                     palette,
                     usize::from(width.saturating_sub(1)),
                 ));
